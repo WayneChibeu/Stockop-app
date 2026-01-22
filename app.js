@@ -37,7 +37,6 @@ window.addEventListener('DOMContentLoaded', () => {
     renderShiftUI();
 
     if (location.protocol.startsWith('http')) {
-        const link = document.createElement('link'); link.rel = 'manifest'; link.href = './manifest.json'; document.head.appendChild(link);
         if ('serviceWorker' in navigator) navigator.serviceWorker.register('./sw.js');
     }
 
