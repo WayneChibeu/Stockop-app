@@ -1,31 +1,31 @@
 # StockOp App
 
-A secure, offline-capable Progressive Web App (PWA) for inventory management.
+StockOp is a secure, offline-capable Progressive Web App (PWA) designed for efficient inventory management. It allows businesses to track stock levels, value, and product details with a focus on performance and security.
 
 ## Features
-- **📦 Inventory Management**: Add, edit, delete, and track stock.
-- **⚡ Offline Ready**: Works without internet via Service Worker.
-- **📊 Dashboard**: Real-time stats and visual charts (Value by Category).
-- **🔔 Notifications**: System alerts for low stock items.
-- **🛡️ Secure**: Strict Content Security Policy (CSP), XSS protection, and secure CSV export.
-- **🌍 Bilingual**: English & Swahili support.
-- **📄 Reporting**: Export data to PDF and CSV.
 
-## Installation
-1.  **Hosting**: Upload the contents to any static host (Netlify, GitHub Pages, Vercel).
-2.  **Local**: Open `index.html` in your browser.
-3.  **Install**: Click the "Install App" button in the header (or browser menu) to add it to your Home Screen.
+- **Inventory Management**: Comprehensive tools to add, edit, delete, and organize stock items.
+- **Offline Functionality**: Fully functional without an internet connection.
+- **Dashboard Analytics**: Real-time visualization of stock value and category distribution.
+- **Low Stock Alerts**: Automated notifications for items running low.
+- **Bilingual Support**: Native support for English and Swahili.
+- **Data Reporting**: Export inventory reports to PDF and CSV formats.
+- **Security**: Implements strict Content Security Policy (CSP) and XSS protection.
 
-## Security Verification
-This app adheres to a **Strict CSP** (No `unsafe-inline` scripts).
-To verify:
-1.  Open Developer Tools (F12).
-2.  Check the Console. You should see a big red "STOP!" warning (security feature) but **NO** CSP violations.
+## Usage
 
-## Development
-- **No Build Step**: Just vanilla HTML, CSS, and JS.
-- **Icons**: Uses Lucide Icons (via CDN).
-- **PDFs**: Uses jsPDF (via CDN).
+StockOp is built as a static web application requiring no complex server setup.
+
+1. **Deployment**: Upload the files to any static hosting service (e.g., Netlify, GitHub Pages, Vercel).
+2. **Local Usage**: Open `index.html` directly in a modern web browser.
+3. **Installation**: As a PWA, it can be installed directly to your device's home screen for a native app experience.
+
+## Technical Details
+
+- Built with vanilla HTML, CSS, and JavaScript.
+- No build steps or compilation required.
+- Uses Lucide for iconography and jsPDF for document generation.
 
 ## License
+
 MIT
