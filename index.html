@@ -1,0 +1,1020 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta http-equiv="Content-Security-Policy"
+        content="default-src 'self'; script-src 'self' https://unpkg.com https://cdnjs.cloudflare.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data:; connect-src 'self' https://unpkg.com https://cdnjs.cloudflare.com;">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="theme-color" content="#000000">
+    <title>StockOp</title>
+    <!-- FAVICON -->
+    <link rel="icon" type="image/svg+xml"
+        href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%233B82F6' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z'%3E%3C/path%3E%3Cpolyline points='3.27 6.96 12 12.01 20.73 6.96'%3E%3C/polyline%3E%3Cline x1='12' y1='22.08' x2='12' y2='12'%3E%3C/line%3E%3C/svg%3E">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.28/jspdf.plugin.autotable.min.js"></script>
+
+    <style>
+        :root {
+            --bg-body: #FFFFFF;
+            --bg-card: #FFFFFF;
+            --bg-input: #F1F5F9;
+            --text-main: #0F172A;
+            --text-muted: #64748B;
+            --border-color: #E2E8F0;
+            --primary: #3B82F6;
+            --danger: #EF4444;
+            --success: #22C55E;
+            --warning: #F59E0B;
+            --header-height: 155px;
+            --radius: 12px;
+        }
+
+        [data-theme="dark"] {
+            --bg-body: #000000;
+            --bg-card: #000000;
+            --bg-input: #121212;
+            --text-main: #FFFFFF;
+            --text-muted: #A3A3A3;
+            --border-color: #333333;
+        }
+
+        * {
+            box-sizing: border-box;
+            -webkit-tap-highlight-color: transparent;
+        }
+
+        body {
+            background: var(--bg-body);
+            color: var(--text-main);
+            font-family: 'Inter', sans-serif;
+            margin: 0;
+            padding-top: var(--header-height);
+            padding-bottom: 80px;
+            transition: background 0.3s, color 0.3s;
+        }
+
+        .app-header {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            background: var(--bg-card);
+            border-bottom: 1px solid var(--border-color);
+            z-index: 100;
+            transition: background 0.3s;
+        }
+
+        .top-row {
+            height: 60px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 0 16px;
+        }
+
+        .brand {
+            font-weight: 800;
+            font-size: 20px;
+            color: var(--text-main);
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            flex: 1;
+            min-width: 0;
+            overflow: hidden;
+        }
+
+        .brand span {
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        .actions {
+            display: flex;
+            gap: 8px;
+            flex-shrink: 0;
+        }
+
+        .btn-icon {
+            height: 36px;
+            padding: 0 12px;
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            background: transparent;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            font-weight: 600;
+            font-size: 13px;
+            color: var(--text-main);
+            transition: all 0.2s;
+        }
+
+        .btn-icon:hover {
+            background: var(--bg-input);
+        }
+
+        @media (max-width: 400px) {
+            .btn-icon {
+                padding: 0 8px;
+                gap: 4px;
+            }
+
+            .brand {
+                font-size: 18px;
+            }
+
+            .actions {
+                gap: 4px;
+            }
+        }
+
+        #toast-container {
+            position: fixed;
+            top: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            z-index: 500;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            width: 90%;
+            max-width: 350px;
+            pointer-events: none;
+        }
+
+        .toast {
+            background: var(--bg-card);
+            color: var(--text-main);
+            padding: 12px 16px;
+            border-radius: 8px;
+            box-shadow: 0 4px 16px rgba(0, 0, 0, 0.1);
+            border: 1px solid var(--border-color);
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            font-weight: 500;
+            font-size: 14px;
+            animation: slideDown 0.3s ease-out;
+            pointer-events: auto;
+        }
+
+        @keyframes slideDown {
+            from {
+                opacity: 0;
+                transform: translateY(-20px);
+            }
+
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        .empty-state {
+            text-align: center;
+            color: var(--text-muted);
+            padding: 40px 20px;
+        }
+
+        #welcome-modal {
+            position: fixed;
+            inset: 0;
+            background: var(--bg-body);
+            z-index: 400;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+            overflow-y: auto;
+        }
+
+        .welcome-card {
+            width: 100%;
+            max-width: 400px;
+            text-align: center;
+        }
+
+        .search-overlay {
+            position: absolute;
+            inset: 0;
+            background: var(--bg-card);
+            backdrop-filter: blur(10px);
+            -webkit-backdrop-filter: blur(10px);
+            display: flex;
+            align-items: center;
+            padding: 0 16px;
+            gap: 12px;
+            z-index: 110;
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+
+        [data-theme="dark"] .search-overlay {
+            background: rgba(0, 0, 0, 0.8);
+        }
+
+        .search-input-wrap {
+            flex: 1;
+            position: relative;
+        }
+
+        .search-input {
+            width: 100%;
+            height: 44px;
+            border-radius: 22px;
+            border: 1px solid var(--border-color);
+            background: var(--bg-input);
+            padding: 0 76px 0 44px;
+            font-size: 16px;
+            color: var(--text-main);
+            outline: none;
+            transition: all 0.2s;
+        }
+
+        .search-input:focus {
+            border-color: var(--primary);
+            box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
+            background: var(--bg-card);
+        }
+
+        .search-prefix {
+            position: absolute;
+            left: 14px;
+            top: 50%;
+            transform: translateY(-50%);
+            color: var(--text-muted);
+            pointer-events: none;
+        }
+
+        .clear-search,
+        .mic-btn {
+            position: absolute;
+            top: 50%;
+            transform: translateY(-50%);
+            background: none;
+            border: none;
+            cursor: pointer;
+            width: 32px;
+            height: 32px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border-radius: 50%;
+            transition: all 0.2s;
+        }
+
+        .clear-search:hover,
+        .mic-btn:hover {
+            background: rgba(0, 0, 0, 0.05);
+        }
+
+        .clear-search {
+            right: 8px;
+            color: var(--text-muted);
+        }
+
+        .mic-btn {
+            right: 40px;
+            color: var(--primary);
+        }
+
+        .tab-scroll {
+            display: flex;
+            gap: 8px;
+            padding: 0 16px 12px;
+            overflow-x: auto;
+            scrollbar-width: none;
+        }
+
+        .tab-btn {
+            padding: 8px 16px;
+            border-radius: 20px;
+            font-size: 13px;
+            font-weight: 600;
+            background: var(--bg-input);
+            color: var(--text-muted);
+            border: none;
+            white-space: nowrap;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .tab-btn.active {
+            background: var(--text-main);
+            color: var(--bg-card);
+        }
+
+        .list-container {
+            padding: 16px;
+            max-width: 800px;
+            margin: 0 auto;
+        }
+
+        .item-card {
+            background: var(--bg-card);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius);
+            padding: 16px;
+            margin-bottom: 12px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            transition: transform 0.1s;
+        }
+
+        .item-card:active {
+            transform: scale(0.99);
+        }
+
+        .info {
+            flex: 1;
+        }
+
+        .name {
+            font-weight: 700;
+            font-size: 16px;
+            display: block;
+            margin-bottom: 4px;
+        }
+
+        .meta {
+            font-size: 12px;
+            color: var(--text-muted);
+            display: flex;
+            gap: 8px;
+            align-items: center;
+            flex-wrap: wrap;
+        }
+
+        .sku {
+            font-family: monospace;
+            font-size: 11px;
+            background: var(--bg-input);
+            padding: 2px 4px;
+            border-radius: 4px;
+        }
+
+        .badge {
+            font-size: 10px;
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-weight: 700;
+            text-transform: uppercase;
+            background: var(--bg-input);
+            color: var(--text-muted);
+        }
+
+        .badge-exp {
+            background: rgba(239, 68, 68, 0.1);
+            color: var(--danger);
+        }
+
+        .badge-low {
+            background: rgba(245, 158, 11, 0.1);
+            color: var(--warning);
+        }
+
+        .badge-profit {
+            background: rgba(34, 197, 94, 0.1);
+            color: var(--success);
+        }
+
+        .price-tag {
+            color: var(--success);
+            font-weight: 600;
+        }
+
+        .stepper {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .step-btn {
+            width: 40px;
+            height: 40px;
+            border-radius: 12px;
+            border: 1px solid var(--border-color);
+            background: var(--bg-input);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            color: var(--text-main);
+            font-weight: bold;
+            transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+
+        .step-btn:active {
+            transform: scale(0.9);
+            opacity: 0.8;
+        }
+
+        .step-btn.plus {
+            background: rgba(34, 197, 94, 0.08);
+            color: var(--success);
+            border-color: rgba(34, 197, 94, 0.2);
+        }
+
+        .step-btn.minus {
+            background: rgba(239, 68, 68, 0.08);
+            color: var(--danger);
+            border-color: rgba(239, 68, 68, 0.2);
+        }
+
+        .count-val {
+            width: 40px;
+            text-align: center;
+            font-weight: 800;
+            font-size: 18px;
+        }
+
+        .fab {
+            position: fixed;
+            bottom: 85px;
+            right: 20px;
+            width: 60px;
+            height: 60px;
+            border-radius: 50%;
+            background: var(--text-main);
+            color: var(--bg-card);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            box-shadow: 0 10px 25px rgba(0, 0, 0, 0.2);
+            border: none;
+            cursor: pointer;
+            z-index: 95;
+        }
+
+        .stats-bar {
+            position: fixed;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            height: 70px;
+            background: var(--bg-card);
+            border-top: 1px solid var(--border-color);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 0 20px;
+            z-index: 90;
+        }
+
+        .stat-num {
+            font-size: 16px;
+            font-weight: 800;
+            color: var(--text-main);
+        }
+
+        .btn {
+            padding: 12px 20px;
+            border-radius: 8px;
+            font-weight: 600;
+            cursor: pointer;
+            border: none;
+            font-size: 14px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+        }
+
+        .btn-cancel {
+            background: var(--bg-input);
+            color: var(--text-muted);
+        }
+
+        .btn-save {
+            background: var(--text-main);
+            color: var(--bg-card);
+        }
+
+        .btn-delete {
+            background: rgba(239, 68, 68, 0.1);
+            color: var(--danger);
+            margin-right: auto;
+        }
+
+        .btn-outline {
+            background: transparent;
+            border: 1px solid var(--border-color);
+            color: var(--text-main);
+        }
+
+        .modal-overlay {
+            position: fixed;
+            inset: 0;
+            background: rgba(0, 0, 0, 0.8);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 200;
+            backdrop-filter: blur(4px);
+        }
+
+        .hidden {
+            display: none !important;
+        }
+
+        .modal {
+            background: var(--bg-card);
+            width: 90%;
+            max-width: 400px;
+            padding: 24px;
+            border-radius: 16px;
+            border: 1px solid var(--border-color);
+            color: var(--text-main);
+            max-height: 90vh;
+            overflow-y: auto;
+        }
+
+        .form-group {
+            margin-bottom: 16px;
+        }
+
+        .label {
+            display: block;
+            font-size: 12px;
+            font-weight: 700;
+            color: var(--text-muted);
+            margin-bottom: 6px;
+            text-transform: uppercase;
+        }
+
+        .input {
+            width: 100%;
+            padding: 12px;
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            font-size: 16px;
+            font-family: inherit;
+            background: var(--bg-input);
+            color: var(--text-main);
+        }
+
+        .input:focus {
+            outline: none;
+            border-color: var(--primary);
+        }
+
+        .row {
+            display: flex;
+            gap: 12px;
+        }
+
+        .actions {
+            display: flex;
+            justify-content: flex-end;
+            gap: 12px;
+            margin-top: 24px;
+        }
+
+        #lockout-screen {
+            position: absolute;
+            inset: 0;
+            background: rgba(0, 0, 0, 0.95);
+            z-index: 300;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            color: white;
+        }
+
+        .section-title {
+            font-size: 11px;
+            font-weight: 700;
+            color: var(--text-muted);
+            text-transform: uppercase;
+            margin: 24px 0 12px;
+            padding-top: 16px;
+            border-top: 1px solid var(--border-color);
+        }
+
+        .section-title:first-of-type {
+            margin-top: 0;
+            border-top: none;
+            padding-top: 0;
+        }
+
+        /* DASHBOARD STYLES */
+        .dash-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 12px;
+            margin-bottom: 24px;
+        }
+
+        .dash-card {
+            background: var(--bg-card);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius);
+            padding: 16px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            text-align: center;
+        }
+
+        .dash-card h3 {
+            margin: 0 0 4px;
+            font-size: 11px;
+            color: var(--text-muted);
+            text-transform: uppercase;
+        }
+
+        .dash-card .val {
+            font-size: 20px;
+            font-weight: 800;
+            color: var(--text-main);
+        }
+
+        .dash-card.full-width {
+            grid-column: 1 / -1;
+        }
+
+        .chart-container {
+            background: var(--bg-card);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius);
+            padding: 16px;
+            margin-bottom: 24px;
+        }
+
+        .chart-bar {
+            margin-bottom: 12px;
+        }
+
+        .chart-label {
+            display: flex;
+            justify-content: space-between;
+            font-size: 11px;
+            margin-bottom: 4px;
+            font-weight: 600;
+        }
+
+        .bar-bg {
+            height: 8px;
+            background: var(--bg-input);
+            border-radius: 4px;
+            overflow: hidden;
+        }
+
+        .bar-fill {
+            height: 100%;
+            background: var(--primary);
+            border-radius: 4px;
+        }
+    </style>
+
+</head>
+
+<body>
+
+    <div id="toast-container"></div>
+
+    <!-- WELCOME MODAL -->
+    <div id="welcome-modal" class="hidden">
+        <div class="welcome-card">
+            <div
+                style="width:60px; height:60px; background:var(--text-main); border-radius:16px; display:flex; align-items:center; justify-content:center; margin:0 auto 20px; color:var(--bg-card)">
+                <i data-lucide="package" style="width:32px; height:32px"></i>
+            </div>
+            <h1 style="margin:0 0 10px">Welcome!</h1>
+            <p style="color:var(--text-muted); margin-bottom:30px">Set up your digital store in seconds.</p>
+
+            <div class="form-group" style="text-align:left">
+                <label class="label">Store Name</label>
+                <input type="text" class="input" id="setup-name" placeholder="e.g. John's Store">
+            </div>
+            <div class="form-group" style="text-align:left">
+                <label class="label">Create Admin PIN</label>
+                <input type="password" inputmode="numeric" class="input" id="setup-pin" placeholder="4-Digit Secret"
+                    maxlength="4">
+            </div>
+
+            <div class="form-group" style="text-align:left">
+                <label class="label">Security Question</label>
+                <select class="input" id="setup-q-select">
+                    <option value="What is your mother's maiden name?">What is your mother's maiden name?</option>
+                    <option value="What was the name of your first pet?">What was the name of your first pet?</option>
+                    <option value="What city were you born in?">What city were you born in?</option>
+                    <option value="custom">Custom (Type your own)</option>
+                </select>
+                <input type="text" class="input hidden" id="setup-q-custom" placeholder="Type your question..."
+                    style="margin-top:8px">
+            </div>
+
+            <div class="form-group" style="text-align:left">
+                <label class="label">Answer</label>
+                <input type="text" class="input" id="setup-ans" placeholder="Your Answer">
+            </div>
+
+            <button class="btn btn-save" style="width:100%; margin-top:10px">Get
+                Started</button>
+        </div>
+    </div>
+
+    <header class="app-header">
+        <div class="top-row">
+            <div class="brand">
+                <i data-lucide="package"></i>
+                <span id="store-name-display">StockOp</span>
+            </div>
+            <div class="actions">
+                <button class="btn-icon" id="view-toggle-btn" title="Toggle Dashboard"><i
+                        data-lucide="layout-dashboard"></i></button>
+                <button class="btn-icon" id="theme-btn"><i data-lucide="moon"></i></button>
+                <button class="btn-icon" id="settings-btn"><i data-lucide="settings"></i></button>
+                <button class="btn-icon" id="search-btn"><i data-lucide="search"></i></button>
+                <button class="btn-icon" id="install-btn" style="color:var(--success); border-color:var(--success)"><i
+                        data-lucide="download-cloud"></i></button>
+            </div>
+
+            <div id="search-bar" class="search-overlay hidden">
+                <div class="search-input-wrap">
+                    <i data-lucide="search" class="search-prefix" style="width:18px"></i>
+                    <input type="text" class="search-input" id="search-input" data-t-placeholder="search"
+                        placeholder="Search item...">
+                    <button class="mic-btn"><i data-lucide="mic" style="width:18px"></i></button>
+                    <button class="clear-search"><i data-lucide="x" style="width:18px"></i></button>
+                </div>
+                <button class="btn-icon"
+                    style="border:none; width:44px; height:44px; justify-content:center; padding:0; border-radius:50%">
+                    <i data-lucide="chevron-left" style="width:24px"></i>
+                </button>
+            </div>
+        </div>
+        <div class="tab-scroll" id="tabs"></div>
+        <div
+            style="display:flex; align-items:center; gap:8px; padding:8px 16px; background:var(--bg-card); border-top:1px solid var(--border-color)">
+            <i data-lucide="arrow-up-down" style="width:14px; color:var(--text-muted)"></i>
+            <select id="sort-select" class="input" style="padding:6px 10px; font-size:12px; flex:1">
+                <option value="name">Sort: Name</option>
+                <option value="count-asc">Sort: Count ↑</option>
+                <option value="count-desc">Sort: Count ↓</option>
+                <option value="price-asc">Sort: Price ↑</option>
+                <option value="price-desc">Sort: Price ↓</option>
+                <option value="expiry">Sort: Expiry</option>
+                <option value="category">Sort: Category</option>
+            </select>
+        </div>
+    </header>
+
+    <div class="list-container" id="list"></div>
+    <div class="list-container hidden" id="dashboard-view">
+        <div class="dash-grid">
+            <div class="dash-card full-width">
+                <h3>Total Stock Value</h3>
+                <div class="val" id="dash-total-val">KSh 0</div>
+            </div>
+            <div class="dash-card">
+                <h3>Total Items</h3>
+                <div class="val" id="dash-total-items">0</div>
+            </div>
+            <div class="dash-card">
+                <h3>Low Stock</h3>
+                <div class="val" id="dash-low-stock" style="color:var(--danger)">0</div>
+            </div>
+        </div>
+
+        <div class="chart-container">
+            <h3 style="margin:0 0 16px; font-size:14px">Value by Category</h3>
+            <div id="dash-chart"></div>
+        </div>
+
+        <button class="btn btn-outline" id="enable-notifs-btn" style="width:100%">
+            <i data-lucide="bell" style="width:16px"></i> Enable Low Stock Alerts
+        </button>
+    </div>
+
+    <div class="stats-bar">
+        <div id="shift-btn-container">
+            <button class="btn btn-save" id="shift-btn"><i data-lucide="play" style="width:16px"></i> <span
+                    data-t="startShift">Start Shift</span></button>
+        </div>
+        <div id="shift-status" style="display:none; text-align:left; flex:1; margin-left:12px">
+            <div style="font-size:10px; color:var(--text-muted); font-weight:700" data-t="shiftActive">SHIFT ACTIVE
+            </div>
+            <div id="shift-timer" style="font-size:14px; font-weight:700">00:00:00</div>
+        </div>
+        <div style="text-align:right">
+            <div style="font-size:10px; color:var(--text-muted); font-weight:700" data-t="totalValue">TOTAL VALUE</div>
+            <div class="stat-num" style="color:var(--success)" id="total-value">KSh 0</div>
+        </div>
+    </div>
+
+    <button class="fab"><i data-lucide="plus"></i></button>
+
+    <!-- SETTINGS MODAL -->
+    <div id="settings-modal" class="modal-overlay hidden">
+        <div class="modal">
+            <h2 style="margin-top:0" data-t="storeSettings">Store Settings</h2>
+
+            <div class="section-title" data-t="storeInfo">Store Info</div>
+            <div class="form-group"><label class="label" data-t="storeName">Store Name</label><input type="text"
+                    class="input" id="inp-store-name"></div>
+            <div class="form-group"><label class="label" data-t="adminPin">Change Admin PIN</label><input
+                    type="password" inputmode="numeric" class="input" id="inp-admin-pin" placeholder="****"></div>
+
+            <div class="section-title" data-t="security">Security</div>
+            <div class="form-group">
+                <label class="label" data-t="securityQ">Update Security Question</label>
+                <select class="input" id="inp-q-select">
+                    <option value="What is your mother's maiden name?">What is your mother's maiden name?</option>
+                    <option value="What was the name of your first pet?">What was the name of your first pet?</option>
+                    <option value="What city were you born in?">What city were you born in?</option>
+                    <option value="custom">Custom (Type your own)</option>
+                </select>
+                <input type="text" class="input hidden" id="inp-q-custom" placeholder="Type your question..."
+                    style="margin-top:8px">
+            </div>
+            <div class="form-group"><label class="label" data-t="answer">Update Answer</label><input type="text"
+                    class="input" id="inp-ans"></div>
+
+            <div class="section-title" data-t="dataManagement">Data Management</div>
+            <div style="display:flex; gap:8px; flex-wrap:wrap">
+                <button class="btn btn-outline"><i data-lucide="download" style="width:16px"></i>
+                    <span data-t="exportBackup">Export Backup</span></button>
+                <button class="btn btn-outline"><i data-lucide="upload" style="width:16px"></i> <span
+                        data-t="importBackup">Import
+                        Backup</span></button>
+                <input type="file" id="import-file" accept=".json" style="display:none">
+            </div>
+
+            <div class="section-title" data-t="preferences">Preferences</div>
+            <div class="form-group">
+                <label class="label" data-t="language">Language</label>
+                <select class="input" id="inp-lang">
+                    <option value="en">English</option>
+                    <option value="sw">Kiswahili</option>
+                </select>
+            </div>
+            <div style="margin-top:12px">
+                <button class="btn btn-outline" style="width:100%"><i data-lucide="history" style="width:16px"></i>
+                    <span data-t="viewHistory">View Stock History</span></button>
+            </div>
+
+            <div class="section-title" style="color:var(--danger)" data-t="dangerZone">Danger Zone</div>
+            <button class="btn btn-delete" style="width:100%" data-t="factoryReset">Factory
+                Reset App</button>
+
+            <div class="actions" style="margin-top:24px">
+                <button class="btn btn-cancel" data-t="cancel">Cancel</button>
+                <button class="btn btn-save" data-t="saveSettings">Save Settings</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- PIN PROMPT MODAL -->
+    <div id="pin-modal" class="modal-overlay hidden">
+        <div class="modal" style="width:300px">
+            <h3 style="margin-top:0; text-align:center" data-t="adminLocked">Admin Locked</h3>
+            <div style="display:flex; justify-content:center; margin:16px 0"><i data-lucide="shield-alert"
+                    style="color:var(--text-main); width:48px; height:48px"></i></div>
+            <p style="text-align:center; color:var(--text-muted)" id="pin-msg" data-t="enterPin">Enter PIN to Unlock</p>
+            <input type="password" inputmode="numeric" class="input" id="inp-pin-attempt"
+                style="text-align:center; letter-spacing:4px; font-weight:bold" maxlength="4">
+            <p id="pin-error" style="color:var(--danger); text-align:center; font-size:12px; height:20px; margin:4px 0">
+            </p>
+            <div class="actions" style="justify-content:center; flex-direction:column; gap:8px">
+                <button class="btn btn-save" style="width:100%" data-t="unlock">Unlock</button>
+                <button class="btn btn-cancel" style="width:100%" data-t="cancel">Cancel</button>
+                <a href="#" style="text-align:center; font-size:12px; color:var(--primary); margin-top:8px"
+                    data-t="forgotPin">Forgot PIN?</a>
+            </div>
+        </div>
+    </div>
+
+    <!-- RECOVERY MODAL -->
+    <div id="recovery-modal" class="modal-overlay hidden">
+        <div class="modal">
+            <h3 style="display:flex; align-items:center; gap:8px"><i data-lucide="key-round"></i> Reset PIN</h3>
+            <div
+                style="background:var(--bg-input); padding:12px; border-radius:8px; margin-bottom:16px; font-size:14px; font-weight:600">
+                <span
+                    style="display:block; font-size:10px; color:var(--text-muted); text-transform:uppercase; margin-bottom:4px">SECURITY
+                    QUESTION</span>
+                <span id="rec-question-display">...</span>
+            </div>
+
+            <div class="form-group"><label class="label">Your Answer</label><input type="text" class="input"
+                    id="inp-rec-attempt"></div>
+            <div class="actions">
+                <button class="btn btn-cancel">Cancel</button>
+                <button class="btn btn-save">Verify & Reset</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- INSTALL HELP MODAL -->
+    <div id="install-help-modal" class="modal-overlay hidden">
+        <div class="modal">
+            <h3 style="display:flex; align-items:center; gap:8px"><i data-lucide="smartphone"></i> Install App</h3>
+            <p>To install on your phone:</p>
+            <ol style="padding-left:20px; line-height:1.5; font-size:14px">
+                <li>Tap the <b>Share</b> button (iOS) or <b>Menu</b> (Android).</li>
+                <li>Scroll and tap <b>"Add to Home Screen"</b>.</li>
+            </ol>
+            <div class="actions">
+                <button class="btn btn-save">Got it</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- LOCKOUT SCREEN -->
+    <div id="lockout-screen" class="hidden">
+        <i data-lucide="shield-alert" style="width:64px; height:64px; margin-bottom:16px; color:#EF4444"></i>
+        <h2>Security Lockout</h2>
+        <p>Too many failed attempts.</p>
+        <h1 id="lock-timer" style="font-size:48px; margin:20px 0">30</h1>
+        <p style="color:#A3A3A3">Please wait...</p>
+    </div>
+
+    <!-- ITEM MODAL -->
+    <div id="modal" class="modal-overlay hidden">
+        <div class="modal">
+            <h2 id="modal-title" style="margin-top:0" data-t="itemDetails">Item Details</h2>
+            <input type="hidden" id="edit-id">
+            <div class="form-group"><label class="label" data-t="itemName">Item Name</label><input type="text"
+                    class="input" id="inp-name"></div>
+            <div class="form-group"><label class="label" data-t="itemCode">Item Code / SKU</label><input type="text"
+                    class="input" id="inp-sku" placeholder="e.g. 101 or MILK-BOX"></div>
+            <div class="form-group"><label class="label" data-t="category">Category</label><input type="text"
+                    class="input" id="inp-cat" list="cat-list"><datalist id="cat-list"></datalist></div>
+            <div class="row">
+                <div class="form-group" style="flex:1"><label class="label" data-t="sellingPrice">Selling
+                        Price</label><input type="number" class="input" id="inp-price" placeholder="KSh"></div>
+                <div class="form-group" style="flex:1"><label class="label" data-t="costPrice">Cost Price</label><input
+                        type="number" class="input" id="inp-cost" placeholder="KSh (optional)"></div>
+            </div>
+            <div class="row">
+                <div class="form-group" style="flex:1"><label class="label" data-t="count">Count</label><input
+                        type="number" class="input" id="inp-count"></div>
+                <div class="form-group" style="flex:1"><label class="label" data-t="expiry">Expiry</label><input
+                        type="date" class="input" id="inp-expiry"></div>
+            </div>
+            <div class="actions">
+                <button class="btn btn-delete hidden" id="btn-delete" data-t="delete">Delete</button>
+                <button class="btn btn-cancel" data-t="cancel">Cancel</button>
+                <button class="btn btn-save" data-t="save">Save</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- REPORT MODAL -->
+    <div id="report-modal" class="modal-overlay hidden">
+        <div class="modal" style="text-align:center">
+            <h2 data-t="shiftComplete">Shift Complete</h2>
+            <div style="background:var(--bg-input); padding:16px; border-radius:12px; margin:20px 0; text-align:left">
+                <div style="display:flex; justify-content:space-between; margin-bottom:8px"><span
+                        style="color:var(--text-muted)" data-t="items">Items</span><strong id="rep-count">0</strong>
+                </div>
+                <div style="display:flex; justify-content:space-between"><span style="color:var(--text-muted)"
+                        data-t="value">Value</span><strong id="rep-value" style="color:var(--success)">0</strong></div>
+            </div>
+            <div class="actions" style="justify-content:center; flex-direction:column; gap:8px">
+                <button class="btn btn-save" style="width:100%"><i data-lucide="file-text" style="width:16px"></i> <span
+                        data-t="downloadPdf">Download PDF</span></button>
+                <button class="btn btn-outline" style="width:100%"><i data-lucide="file-spreadsheet"
+                        style="width:16px"></i> <span data-t="downloadCsv">Download
+                        CSV</span></button>
+                <button class="btn btn-save" id="btn-finish-shift-final"
+                    style="width:100%; display:none; background:var(--primary); border-color:var(--primary)"><i
+                        data-lucide="log-out" style="width:16px"></i> <span data-t="finishShift">Finish
+                        Shift</span></button>
+                <button class="btn btn-cancel" style="width:100%" data-t="close">Close</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- HISTORY MODAL -->
+    <div id="history-modal" class="modal-overlay hidden">
+        <div class="modal">
+            <h2 style="display:flex; align-items:center; gap:8px; margin-top:0"><i data-lucide="history"></i> <span
+                    data-t="stockHistory">Stock History</span></h2>
+            <div id="history-list" style="max-height:300px; overflow-y:auto; font-size:13px">
+                <p style="color:var(--text-muted); text-align:center" data-t="noHistory">No history recorded yet.</p>
+            </div>
+            <div class="actions" style="margin-top:16px">
+                <button class="btn btn-delete" data-t="clearHistory">Clear History</button>
+                <button class="btn btn-save" data-t="close">Close</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+
+</html>
