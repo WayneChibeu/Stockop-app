@@ -1,4 +1,4 @@
-# StockOp - Reja Reja PWA
+# StockOp App
 
 A secure, offline-capable Progressive Web App (PWA) for inventory management.
 
