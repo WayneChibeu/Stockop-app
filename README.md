@@ -1,5 +1,8 @@
 # StockOp App
 
+
+**Live Demo:** [https://stockop-app.vercel.app/](https://stockop-app.vercel.app/)
+
 StockOp is a secure, offline-capable Progressive Web App (PWA) designed for efficient inventory management. It allows businesses to track stock levels, value, and product details with a focus on performance and security.
 
 ## Features
