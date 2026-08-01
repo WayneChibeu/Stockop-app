@@ -408,8 +408,8 @@ function setupEventListeners(deferredPrompt) {
     document.getElementById('modal').querySelector('.btn-save').addEventListener('click', saveItem);
 
     // Modals - Report
-    document.getElementById('report-modal').querySelectorAll('.btn-save')[0].addEventListener('click', () => downloadPDF(false));
-    document.getElementById('report-modal').querySelector('.btn-outline').addEventListener('click', downloadCSV);
+    document.getElementById('btn-export-pdf').addEventListener('click', () => downloadPDF(false));
+    document.getElementById('btn-export-csv').addEventListener('click', downloadCSV);
     document.getElementById('btn-end-shift-inline').addEventListener('click', () => {
         document.getElementById('report-modal').classList.remove('hidden');
         lucide.createIcons();
@@ -1626,6 +1626,7 @@ const TRANSLATIONS = {
         preferences: 'Preferences',
         language: 'Language',
         viewHistory: 'View Stock History',
+        dataExport: 'Data Export',
         dangerZone: 'Danger Zone',
         factoryReset: 'Factory Reset App',
         deleteStore: 'Delete Store (Irreversible)',
@@ -1686,6 +1687,7 @@ const TRANSLATIONS = {
         preferences: 'Mapendeleo',
         language: 'Lugha',
         viewHistory: 'Tazama Historia',
+        dataExport: 'Hamisha Data',
         dangerZone: 'Eneo la Hatari',
         factoryReset: 'Futa Programu',
         deleteStore: 'Futa Duka (Haiwezi Kurejeshwa)',

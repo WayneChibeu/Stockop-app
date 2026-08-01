@@ -1105,6 +1105,12 @@
                     <span>Shift Reports</span></button>
             </div>
 
+            <div class="section-title" data-t="dataExport">Data Export</div>
+            <div style="display:flex; gap:8px;">
+                <button class="btn btn-outline" id="btn-export-pdf" style="flex:1"><i data-lucide="file-text" style="width:16px"></i> PDF</button>
+                <button class="btn btn-outline" id="btn-export-csv" style="flex:1"><i data-lucide="file-spreadsheet" style="width:16px"></i> CSV</button>
+            </div>
+
             <div class="section-title">Account</div>
             <button class="btn btn-outline" id="btn-logout" style="width:100%; color:var(--danger); border-color:var(--danger)"><i data-lucide="log-out" style="width:16px"></i> Sign Out</button>
 
@@ -1268,11 +1274,6 @@
                         data-t="value">Value</span><strong id="rep-value" style="color:var(--success)">0</strong></div>
             </div>
             <div class="actions" style="justify-content:center; flex-direction:column; gap:8px">
-                <button class="btn btn-save" style="width:100%"><i data-lucide="file-text" style="width:16px"></i> <span
-                        data-t="downloadPdf">Download PDF</span></button>
-                <button class="btn btn-outline" style="width:100%"><i data-lucide="file-spreadsheet"
-                        style="width:16px"></i> <span data-t="downloadCsv">Download
-                        CSV</span></button>
                 <button class="btn btn-save" id="btn-finish-shift-final"
                     style="width:100%; background:var(--primary); border-color:var(--primary)"><i
                         data-lucide="log-out" style="width:16px"></i> <span data-t="finishShift">Finish
