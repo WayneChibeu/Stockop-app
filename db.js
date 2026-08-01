@@ -312,12 +312,15 @@ async function deleteStorePermanently() {
     // 3. Delete the members collection LAST
     await deleteCollection(storeRef.collection('members'));
     
-    // 4. Clear the owner's storeId reference
-    const userId = firebase.auth().currentUser.uid;
-    await db.collection('users').doc(userId).update({
-        storeId: firebase.firestore.FieldValue.delete(),
-        role: firebase.firestore.FieldValue.delete()
-    });
+    // 4. Delete the owner's user document and Auth account
+    const user = firebase.auth().currentUser;
+    await db.collection('users').doc(user.uid).delete();
+    try {
+        await user.delete();
+    } catch (err) {
+        console.warn("Could not delete auth user, logging out instead:", err);
+        await firebase.auth().signOut();
+    }
 }
 
 // --- CLOUD SHIFT REPORTS ---
