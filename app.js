@@ -410,6 +410,10 @@ function setupEventListeners(deferredPrompt) {
     // Modals - Report
     document.getElementById('report-modal').querySelectorAll('.btn-save')[0].addEventListener('click', () => downloadPDF(false));
     document.getElementById('report-modal').querySelector('.btn-outline').addEventListener('click', downloadCSV);
+    document.getElementById('btn-end-shift-inline').addEventListener('click', () => {
+        document.getElementById('report-modal').classList.remove('hidden');
+        lucide.createIcons();
+    });
     document.getElementById('btn-finish-shift-final').addEventListener('click', confirmEndShift);
     document.getElementById('report-modal').querySelector('.btn-cancel').addEventListener('click', () => document.getElementById('report-modal').classList.add('hidden'));
 
@@ -932,8 +936,6 @@ window.confirmEndShift = () => {
         renderShiftUI();
     }
 };
-
-window.endShift = () => { document.getElementById('report-modal').classList.remove('hidden'); lucide.createIcons(); };
 
 window.toggleSearch = () => {
     const sBar = document.getElementById('search-bar');
