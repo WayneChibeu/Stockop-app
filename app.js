@@ -926,14 +926,21 @@ function updateShiftTimer() {
     }, 1000);
 }
 
-window.confirmEndShift = () => {
+window.confirmEndShift = async () => {
     if (confirm(TRANSLATIONS[LANG].confirmEndShift)) {
-        const { reportData } = finalizeShift(true);
+        const { promise, reportData } = finalizeShift(true);
         downloadPDF(true, reportData);
         
         document.getElementById('report-modal').classList.add('hidden');
-        showToast('Shift Ended & Report Saved', 'success');
         renderShiftUI();
+        
+        try {
+            await promise;
+            showToast('Shift Ended & Report Saved to Cloud', 'success');
+        } catch (err) {
+            console.error(err);
+            showToast('Shift ended, but failed to save to cloud!', 'error');
+        }
     }
 };
 

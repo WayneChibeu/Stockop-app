@@ -354,7 +354,7 @@ function getShiftReports(callback) {
     }, (err) => {
         console.error("Error fetching shift reports", err);
         // Fallback if index is missing (since where + orderBy requires an index in Firestore)
-        if (err.message && err.message.includes('index')) {
+        if (err.code === 'failed-precondition' || (err.message && err.message.toLowerCase().includes('index'))) {
             // Simple fetch without orderBy, sort locally
             let fbQuery = db.collection('stores').doc(currentStoreId).collection('shift_reports');
             if (currentUserRole !== 'owner') {
