@@ -385,10 +385,10 @@ function setupEventListeners(deferredPrompt) {
     document.getElementById('paste-import').addEventListener('click', importPastedData);
 
     // Logout
-    document.getElementById('btn-logout').addEventListener('click', () => {
+    document.getElementById('btn-logout').addEventListener('click', async () => {
         if (confirm('Sign out of StockOp?')) {
             if (SHIFT_DATA.active) {
-                finalizeShift(true); // Auto end and save shift
+                await finalizeShift(true); // Wait for auto end and save shift
             }
             logoutUser();
             location.reload();
@@ -853,9 +853,6 @@ function finalizeShift(isManual) {
         inventoryValue: INVENTORY.reduce((sum, i) => sum + (i.count * i.price), 0)
     };
     
-    // Save to Cloud
-    saveShiftReport(reportData).catch(console.error);
-    
     // Clear Local
     SHIFT_DATA.active = false;
     SHIFT_DATA.startTime = null;
@@ -863,7 +860,8 @@ function finalizeShift(isManual) {
     SHIFT_DATA.actions = [];
     localStorage.setItem('shiftData', JSON.stringify(SHIFT_DATA));
     
-    return reportData;
+    // Save to Cloud and return the promise so callers can await it
+    return saveShiftReport(reportData).catch(console.error);
 }
 
 function checkShiftTimeout() {
@@ -1283,6 +1281,9 @@ document.getElementById('btn-checkout').addEventListener('click', () => {
     processCheckout(POS_CART, totalVal).then(() => {
         btn.disabled = false;
         btn.textContent = 'Checkout';
+        
+        // Log the checkout as an activity (this auto-starts a shift if one isn't active)
+        logHistory('Checkout', `${POS_CART.length} items`, `KSh ${totalVal}`);
         
         // Save receipt data before clearing cart
         LAST_RECEIPT = { items: [...POS_CART], total: totalVal, date: new Date().toLocaleString() };
