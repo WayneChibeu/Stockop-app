@@ -997,10 +997,22 @@ window.downloadPDF = async (isShiftReport = false, pastReport = null) => {
             doc.addPage();
             doc.setFontSize(12);
             doc.text('Final Inventory State', 14, 20);
-            doc.autoTable({ head: [['Item', 'SKU', 'Category', 'Count', 'Price', 'Value']], body: INVENTORY.map(i => [i.name, i.sku || '-', i.cat, i.count, 'KSh ' + i.price, 'KSh ' + (i.count * i.price)]), startY: 25 });
+            const totalValue = INVENTORY.reduce((sum, item) => sum + (item.count * item.price), 0);
+            doc.autoTable({ 
+                head: [['Item', 'SKU', 'Category', 'Count', 'Price', 'Value']], 
+                body: INVENTORY.map(i => [i.name, i.sku || '-', i.cat, i.count, 'KSh ' + i.price, 'KSh ' + (i.count * i.price)]), 
+                foot: [['', '', '', '', 'Total Value', 'KSh ' + totalValue]],
+                startY: 25 
+            });
         }
     } else {
-        doc.autoTable({ head: [['Item', 'SKU', 'Category', 'Count', 'Price', 'Value']], body: INVENTORY.map(i => [i.name, i.sku || '-', i.cat, i.count, 'KSh ' + i.price, 'KSh ' + (i.count * i.price)]), startY: 35 });
+        const totalValue = INVENTORY.reduce((sum, item) => sum + (item.count * item.price), 0);
+        doc.autoTable({ 
+            head: [['Item', 'SKU', 'Category', 'Count', 'Price', 'Value']], 
+            body: INVENTORY.map(i => [i.name, i.sku || '-', i.cat, i.count, 'KSh ' + i.price, 'KSh ' + (i.count * i.price)]), 
+            foot: [['', '', '', '', 'Total Value', 'KSh ' + totalValue]],
+            startY: 35 
+        });
     }
 
     doc.save(isShiftReport ? `shift_report_${new Date().getTime()}.pdf` : 'stockop_report.pdf');
