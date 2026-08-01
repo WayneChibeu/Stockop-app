@@ -898,7 +898,7 @@ function renderShiftUI() {
     const t = TRANSLATIONS[LANG];
 
     if (SHIFT_DATA.active) {
-        status.style.display = 'block';
+        status.style.display = 'flex';
         updateShiftTimer();
     } else {
         status.style.display = 'none';
