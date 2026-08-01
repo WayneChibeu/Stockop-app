@@ -339,22 +339,7 @@ function setupEventListeners(deferredPrompt) {
     // FAB — no PIN check needed, user is already authenticated
     document.querySelector('.fab').addEventListener('click', () => openAddModal());
 
-    // List Delegation
-    document.getElementById('list').addEventListener('click', (e) => {
-        const target = e.target.closest('[data-action]');
-        if (!target) return;
 
-        const action = target.dataset.action;
-        const id = parseInt(target.dataset.id);
-
-        if (action === 'edit') {
-            openModal(id);
-        } else if (action === 'dec') {
-            mod(id, -1);
-        } else if (action === 'inc') {
-            mod(id, 1);
-        }
-    });
 
     // Modals - Setup (simplified, no PIN)
     document.getElementById('welcome-modal').querySelector('.btn-save').addEventListener('click', completeSetup);
@@ -769,7 +754,7 @@ window.mod = (id, d) => {
     if (i && i.count + d >= 0) {
         updateItemCountInDB(id, i.count + d);
         const actionStr = d > 0 ? 'added' : 'subtracted';
-        logHistory(actionStr, i.name, `Count: ${i.count} → ${i.count + d}`);
+        logHistory(actionStr, i.name, `Count: ${i.count} -> ${i.count + d}`);
         // We don't render() here, because the Firebase listener will trigger a render automatically
     }
 };
