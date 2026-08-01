@@ -284,6 +284,40 @@ function regenerateStoreCode() {
     }).then(() => newCode);
 }
 
+// Delete a collection in batches of 500
+async function deleteCollection(collectionRef) {
+    let snapshot = await collectionRef.limit(500).get();
+    while (snapshot.size > 0) {
+        const batch = db.batch();
+        snapshot.docs.forEach((doc) => batch.delete(doc.ref));
+        await batch.commit();
+        snapshot = await collectionRef.limit(500).get();
+    }
+}
+
+// Completely wipe a store and all its data (Owner only)
+async function deleteStorePermanently() {
+    if (!currentStoreId || currentUserRole !== 'owner') return Promise.reject("Not authorized");
+    const storeRef = db.collection('stores').doc(currentStoreId);
+    
+    // 1. Delete all subcollections
+    await deleteCollection(storeRef.collection('inventory'));
+    await deleteCollection(storeRef.collection('sales'));
+    await deleteCollection(storeRef.collection('shift_reports'));
+    await deleteCollection(storeRef.collection('suppliers'));
+    await deleteCollection(storeRef.collection('members'));
+    
+    // 2. Delete the main store document
+    await storeRef.delete();
+    
+    // 3. Clear the owner's storeId reference
+    const userId = firebase.auth().currentUser.uid;
+    await db.collection('users').doc(userId).update({
+        storeId: firebase.firestore.FieldValue.delete(),
+        role: firebase.firestore.FieldValue.delete()
+    });
+}
+
 // --- CLOUD SHIFT REPORTS ---
 
 function saveShiftReport(reportData) {

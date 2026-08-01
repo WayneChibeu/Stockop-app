@@ -388,7 +388,7 @@ function setupEventListeners(deferredPrompt) {
     document.getElementById('btn-logout').addEventListener('click', async () => {
         if (confirm('Sign out of StockOp?')) {
             if (SHIFT_DATA.active) {
-                await finalizeShift(true); // Wait for auto end and save shift
+                await finalizeShift(true).promise; // Wait for auto end and save shift
             }
             logoutUser();
             location.reload();
@@ -860,8 +860,9 @@ function finalizeShift(isManual) {
     SHIFT_DATA.actions = [];
     localStorage.setItem('shiftData', JSON.stringify(SHIFT_DATA));
     
-    // Save to Cloud and return the promise so callers can await it
-    return saveShiftReport(reportData).catch(console.error);
+    // Save to Cloud and return the promise and data
+    const promise = saveShiftReport(reportData).catch(console.error);
+    return { promise, reportData };
 }
 
 function checkShiftTimeout() {
@@ -923,8 +924,8 @@ function updateShiftTimer() {
 
 window.confirmEndShift = () => {
     if (confirm(TRANSLATIONS[LANG].confirmEndShift)) {
-        const report = finalizeShift(true);
-        downloadPDF(true, report);
+        const { reportData } = finalizeShift(true);
+        downloadPDF(true, reportData);
         
         document.getElementById('report-modal').classList.add('hidden');
         showToast('Shift Ended & Report Saved', 'success');
@@ -1625,6 +1626,7 @@ const TRANSLATIONS = {
         viewHistory: 'View Stock History',
         dangerZone: 'Danger Zone',
         factoryReset: 'Factory Reset App',
+        deleteStore: 'Delete Store (Irreversible)',
         saveSettings: 'Save Settings',
         adminLocked: 'Admin Locked',
         enterPin: 'Enter PIN to Unlock',
@@ -1684,6 +1686,7 @@ const TRANSLATIONS = {
         viewHistory: 'Tazama Historia',
         dangerZone: 'Eneo la Hatari',
         factoryReset: 'Futa Programu',
+        deleteStore: 'Futa Duka (Haiwezi Kurejeshwa)',
         saveSettings: 'Hifadhi Mipangilio',
         adminLocked: 'Admin Imefungwa',
         enterPin: 'Ingiza PIN kufungua',
@@ -1964,6 +1967,31 @@ document.getElementById('btn-reset-app').addEventListener('click', (e) => {
     e.preventDefault();
     resetApp();
 });
+
+const btnDeleteStore = document.getElementById('btn-delete-store');
+if (btnDeleteStore) {
+    btnDeleteStore.addEventListener('click', async () => {
+        const confirmText = prompt('WARNING: This will permanently wipe all inventory, sales, shifts, and members from the cloud. This cannot be undone.\n\nType "DELETE" to confirm:');
+        if (confirmText === 'DELETE') {
+            btnDeleteStore.disabled = true;
+            btnDeleteStore.textContent = 'Deleting...';
+            try {
+                await deleteStorePermanently();
+                alert('Store successfully deleted from servers.');
+                localStorage.clear();
+                sessionStorage.clear();
+                location.reload();
+            } catch (err) {
+                console.error(err);
+                alert('Failed to delete store: ' + err);
+                btnDeleteStore.disabled = false;
+                btnDeleteStore.textContent = TRANSLATIONS[LANG].deleteStore || 'Delete Store (Irreversible)';
+            }
+        } else if (confirmText !== null) {
+            alert('Confirmation failed. Store was not deleted.');
+        }
+    });
+}
 
 document.getElementById('btn-clear-cart').addEventListener('click', () => {
     if (POS_CART.length === 0) return;
