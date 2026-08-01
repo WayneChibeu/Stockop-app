@@ -1,4 +1,4 @@
-const CACHE_NAME = 'stockop-v1';
+const CACHE_NAME = 'stockop-v2';
 const ASSETS = [
   './',
   './index.html',
@@ -11,14 +11,37 @@ const ASSETS = [
 
 // Install Event
 self.addEventListener('install', (e) => {
+  self.skipWaiting();
   e.waitUntil(
     caches.open(CACHE_NAME).then((cache) => cache.addAll(ASSETS))
   );
 });
 
-// Fetch Event
-self.addEventListener('fetch', (e) => {
-  e.respondWith(
-    caches.match(e.request).then((response) => response || fetch(e.request))
+// Activate Event (clears old caches)
+self.addEventListener('activate', (e) => {
+  e.waitUntil(
+    caches.keys().then((keyList) => {
+      return Promise.all(keyList.map((key) => {
+        if (key !== CACHE_NAME) {
+          return caches.delete(key);
+        }
+      }));
+    })
   );
+  return self.clients.claim();
+});
+
+// Fetch Event (Network First, fallback to cache for HTML, cache first for assets)
+self.addEventListener('fetch', (e) => {
+  if (e.request.mode === 'navigate') {
+    // For page navigations (HTML), try network first to always get the latest version!
+    e.respondWith(
+      fetch(e.request).catch(() => caches.match(e.request))
+    );
+  } else {
+    // For other assets, try cache first
+    e.respondWith(
+      caches.match(e.request).then((response) => response || fetch(e.request))
+    );
+  }
 });
