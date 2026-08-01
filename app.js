@@ -768,6 +768,8 @@ window.mod = (id, d) => {
     const i = INVENTORY.find(x => x.id == id);
     if (i && i.count + d >= 0) {
         updateItemCountInDB(id, i.count + d);
+        const actionStr = d > 0 ? 'added' : 'subtracted';
+        logHistory(actionStr, i.name, `Count: ${i.count} → ${i.count + d}`);
         // We don't render() here, because the Firebase listener will trigger a render automatically
     }
 };
