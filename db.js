@@ -300,17 +300,19 @@ async function deleteStorePermanently() {
     if (!currentStoreId || currentUserRole !== 'owner') return Promise.reject("Not authorized");
     const storeRef = db.collection('stores').doc(currentStoreId);
     
-    // 1. Delete all subcollections
+    // 1. Delete all subcollections EXCEPT members (since isOwner relies on members)
     await deleteCollection(storeRef.collection('inventory'));
     await deleteCollection(storeRef.collection('sales'));
     await deleteCollection(storeRef.collection('shift_reports'));
     await deleteCollection(storeRef.collection('suppliers'));
-    await deleteCollection(storeRef.collection('members'));
     
-    // 2. Delete the main store document
+    // 2. Delete the main store document (isOwner will still pass because members exist)
     await storeRef.delete();
     
-    // 3. Clear the owner's storeId reference
+    // 3. Delete the members collection LAST
+    await deleteCollection(storeRef.collection('members'));
+    
+    // 4. Clear the owner's storeId reference
     const userId = firebase.auth().currentUser.uid;
     await db.collection('users').doc(userId).update({
         storeId: firebase.firestore.FieldValue.delete(),
