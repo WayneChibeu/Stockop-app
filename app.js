@@ -1300,18 +1300,6 @@ document.getElementById('btn-checkout').addEventListener('click', () => {
         
         document.getElementById('checkout-modal').classList.remove('hidden');
         
-        // Check for Low Stock for Emails
-        const lowItems = [];
-        POS_CART.forEach(c => {
-            const dbItem = INVENTORY.find(i => i.id == c.id);
-            if (dbItem && (dbItem.count - c.qty) <= 0) {
-                lowItems.push(dbItem.name);
-            }
-        });
-        if (lowItems.length > 0) {
-            sendLowStockEmail(lowItems);
-        }
-        
         POS_CART = []; // Clear cart
         localStorage.setItem('posCart', JSON.stringify(POS_CART));
         if (currentView === 'pos') renderPOS();
@@ -1424,30 +1412,6 @@ document.getElementById('btn-print-receipt').addEventListener('click', () => {
         document.getElementById('checkout-modal').classList.add('hidden');
     }, 500);
 });
-
-// --- EMAIL ALERTS LOGIC ---
-window.sendLowStockEmail = (itemNames) => {
-    // Requires EmailJS initialization
-    // For this to work in production, owner needs to configure EmailJS keys.
-    // Assuming a placeholder setup for now:
-    try {
-        emailjs.init("YOUR_PUBLIC_KEY"); // Placeholder
-        const templateParams = {
-            to_name: SETTINGS.name + " Owner",
-            message: "The following items have just run out of stock during checkout:\n\n" + itemNames.join("\n"),
-            reply_to: "no-reply@stockop.app"
-        };
-        
-        emailjs.send('YOUR_SERVICE_ID', 'YOUR_TEMPLATE_ID', templateParams)
-            .then(function(response) {
-                console.log('Email sent!', response.status, response.text);
-            }, function(error) {
-                console.log('Email failed...', error);
-            });
-    } catch (e) {
-        console.warn('EmailJS not configured yet:', e);
-    }
-};
 
 function renderDashboard() {
     if (currentView !== 'dashboard') return;
