@@ -1,20 +1,37 @@
 // --- DATA ---
-let INVENTORY = JSON.parse(localStorage.getItem('inventory')) || [];
+let INVENTORY = []; // Loaded from Firebase
+let SUPPLIERS = [];
+let POS_CART = JSON.parse(localStorage.getItem('posCart')) || [];
+let currentView = localStorage.getItem('currentView') || 'list';
 let HISTORY = JSON.parse(localStorage.getItem('stockHistory')) || [];
 let LANG = localStorage.getItem('lang') || 'en';
 
 let SETTINGS = {
-    name: localStorage.getItem('storeName') || 'StockOp',
-    pin: localStorage.getItem('storePin') || '0000',
-    secQ: localStorage.getItem('secQ') || 'What is your mother\'s maiden name?',
-    secA: localStorage.getItem('secA') || ''
+    name: localStorage.getItem('storeName') || 'StockOp'
 };
 
 let SHIFT_DATA = JSON.parse(localStorage.getItem('shiftData')) || {
     active: false,
     startTime: null,
+    lastActivity: null,
     actions: []
 };
+
+// Check if URL contains ?reset=true or ?clear=1
+const urlParams = new URLSearchParams(window.location.search);
+if (urlParams.get('reset') === 'true') {
+    localStorage.clear();
+    window.location.href = window.location.pathname; // reloads clean without query
+}
+
+// Add a button: "Clear Local Data / Reset App"
+function resetApp() {
+    if (confirm("Are you sure? This will wipe all data and reset the app.")) {
+        localStorage.clear();
+        sessionStorage.clear();
+        location.reload();
+    }
+}
 
 // --- INIT ---
 window.addEventListener('DOMContentLoaded', () => {
@@ -26,16 +43,6 @@ window.addEventListener('DOMContentLoaded', () => {
         console.log('%cThis is a browser feature intended for developers. Use of this console may allow attackers to steal your information.', 'font-size: 20px;');
     }
 
-
-    if (!localStorage.getItem('isSetup')) {
-        document.getElementById('welcome-modal').classList.remove('hidden');
-    } else {
-        document.title = SETTINGS.name;
-        document.getElementById('store-name-display').innerText = SETTINGS.name;
-    }
-
-    renderShiftUI();
-
     if (location.protocol.startsWith('http')) {
         if ('serviceWorker' in navigator) navigator.serviceWorker.register('./sw.js');
     }
@@ -43,20 +50,247 @@ window.addEventListener('DOMContentLoaded', () => {
     let deferredPrompt;
     window.addEventListener('beforeinstallprompt', e => { e.preventDefault(); deferredPrompt = e; });
 
-    const unlockTime = parseInt(localStorage.getItem('lockoutUntil')) || 0;
-    if (Date.now() < unlockTime) startLockout(unlockTime - Date.now());
+    // --- Firebase Auth State Listener ---
+    // This is the master controller. The app only loads data once the user is logged in
+    // AND their store context is loaded.
+    onAuthStateChanged((user) => {
+        if (user) {
+            // User is signed in — load their store context first
+            loadUserStore((storeInfo) => {
+                if (!storeInfo) {
+                    if (window.isRegistering) return; // Wait for registration to complete
 
-    render();
-    lucide.createIcons();
+                    // Edge case: legacy account without a store. Log them out so they aren't stuck!
+                    logoutUser().catch(console.error);
+                    return;
+                }
 
-    // Apply saved language on load
-    if (LANG) {
-        document.getElementById('inp-lang').value = LANG;
-        setTimeout(() => applyTranslations(LANG), 100);
-    }
+                // Store context loaded — now show the app
+                document.getElementById('auth-screen').style.display = 'none';
+                hideLoader();
 
-    setupEventListeners(deferredPrompt);
+                // Apply role-based UI visibility
+                applyRoleVisibility(currentUserRole);
+
+                // Load store settings from cloud
+                loadStoreSettings((settings) => {
+                    if (settings && settings.name) {
+                        SETTINGS.name = settings.name;
+                        localStorage.setItem('storeName', settings.name);
+                        document.title = settings.name;
+                        document.getElementById('store-name-display').innerText = settings.name;
+                    }
+                    if (settings && settings.storeCode && currentUserRole === 'owner') {
+                        document.getElementById('display-store-code').textContent = settings.storeCode;
+                    }
+                });
+
+                document.title = SETTINGS.name;
+                document.getElementById('store-name-display').innerText = SETTINGS.name;
+
+                renderShiftUI();
+
+                // Start listening for real-time inventory updates
+                listenToInventory((items) => {
+                    INVENTORY = items;
+                    if (currentView === 'list') render();
+                    if (currentView === 'dashboard') renderDashboard();
+                    if (currentView === 'pos') renderPOS();
+                });
+
+                // Listen to suppliers
+                listenToSuppliers((sups) => {
+                    SUPPLIERS = sups;
+                    updateSupplierDropdown();
+                    if (currentView === 'suppliers') renderSuppliers();
+                });
+
+                // Load team members (owner only)
+                if (currentUserRole === 'owner') {
+                    getStoreMembers((members) => {
+                        renderTeamMembers(members);
+                    });
+                }
+
+                lucide.createIcons();
+
+                // Apply saved language on load
+                if (LANG) {
+                    document.getElementById('inp-lang').value = LANG;
+                    setTimeout(() => applyTranslations(LANG), 100);
+                }
+                
+                // Apply saved view
+                setTimeout(() => switchView(currentView), 150);
+
+                setupEventListeners(deferredPrompt);
+            });
+        } else {
+            // User is signed out — show auth screen
+            document.getElementById('auth-screen').style.display = 'flex';
+            lucide.createIcons();
+            hideLoader();
+        }
+    });
+
+    // --- Auth Screen Event Listeners ---
+    document.getElementById('show-register').addEventListener('click', (e) => {
+        e.preventDefault();
+        document.getElementById('login-form').classList.add('hidden');
+        document.getElementById('register-form').classList.remove('hidden');
+        document.getElementById('auth-error').textContent = '';
+    });
+    document.getElementById('show-login').addEventListener('click', (e) => {
+        e.preventDefault();
+        document.getElementById('register-form').classList.add('hidden');
+        document.getElementById('login-form').classList.remove('hidden');
+        document.getElementById('auth-error').textContent = '';
+    });
+    
+    document.getElementById('btn-back-to-login').addEventListener('click', (e) => {
+        e.preventDefault();
+        document.getElementById('register-form').classList.add('hidden');
+        document.getElementById('login-form').classList.remove('hidden');
+        document.getElementById('auth-error').textContent = '';
+    });
+
+    // Toggle "Join a Store" section on registration
+    document.getElementById('reg-join-toggle').addEventListener('change', (e) => {
+        const joinSection = document.getElementById('reg-join-section');
+        const storeNameGroup = document.getElementById('reg-store-name-group');
+        if (e.target.checked) {
+            joinSection.classList.remove('hidden');
+            storeNameGroup.classList.add('hidden');
+        } else {
+            joinSection.classList.add('hidden');
+            storeNameGroup.classList.remove('hidden');
+        }
+    });
+
+    document.getElementById('btn-login').addEventListener('click', () => {
+        const email = document.getElementById('login-email').value;
+        const pass = document.getElementById('login-password').value;
+        if (!email || !pass) { 
+            document.getElementById('auth-error').style.color = 'var(--danger)';
+            document.getElementById('auth-error').textContent = 'Please fill all fields'; 
+            return; 
+        }
+        document.getElementById('btn-login').disabled = true;
+        document.getElementById('btn-login').textContent = 'Signing in...';
+        loginUser(email, pass).catch(err => {
+            document.getElementById('auth-error').style.color = 'var(--danger)';
+            document.getElementById('auth-error').textContent = getFriendlyErrorMessage(err);
+            document.getElementById('btn-login').disabled = false;
+            document.getElementById('btn-login').textContent = 'Sign In';
+        });
+    });
+
+    document.getElementById('forgot-pwd').addEventListener('click', (e) => {
+        e.preventDefault();
+        const email = document.getElementById('login-email').value;
+        if (!email) {
+            document.getElementById('auth-error').style.color = 'var(--danger)';
+            document.getElementById('auth-error').textContent = 'Please enter your email above to reset your password.';
+            return;
+        }
+        document.getElementById('auth-error').style.color = 'var(--text-muted)';
+        document.getElementById('auth-error').textContent = 'Sending reset link...';
+        resetPassword(email).then(() => {
+            document.getElementById('auth-error').style.color = 'var(--success)';
+            document.getElementById('auth-error').textContent = 'Password reset link sent to your email!';
+        }).catch(err => {
+            document.getElementById('auth-error').style.color = 'var(--danger)';
+            document.getElementById('auth-error').textContent = getFriendlyErrorMessage(err);
+        });
+    });
+
+    document.getElementById('btn-register').addEventListener('click', () => {
+        const isJoining = document.getElementById('reg-join-toggle').checked;
+        const storeName = document.getElementById('reg-store-name').value;
+        const storeCode = document.getElementById('reg-store-code').value;
+        const email = document.getElementById('reg-email').value;
+        const pass = document.getElementById('reg-password').value;
+
+        if (!email || !pass) { document.getElementById('auth-error').textContent = 'Please fill all fields'; return; }
+        if (!isJoining && !storeName) { document.getElementById('auth-error').textContent = 'Please enter a store name'; return; }
+        if (isJoining && !storeCode) { document.getElementById('auth-error').textContent = 'Please enter the store code'; return; }
+        if (pass.length < 6) { document.getElementById('auth-error').textContent = 'Password must be at least 6 characters'; return; }
+
+        document.getElementById('btn-register').disabled = true;
+        document.getElementById('btn-register').textContent = 'Creating account...';
+
+        window.isRegistering = true; // Prevent the auth listener from logging them out instantly
+
+        registerUser(email, pass).then(() => {
+            if (isJoining) {
+                // Employee joining an existing store
+                return joinStoreByCode(storeCode, email).then((result) => {
+                    SETTINGS.name = result.storeName;
+                    localStorage.setItem('storeName', result.storeName);
+                });
+            } else {
+                // Owner creating a new store
+                return createStore(storeName, email).then(() => {
+                    SETTINGS.name = storeName;
+                    localStorage.setItem('storeName', storeName);
+                });
+            }
+        }).then(() => {
+            // Once the store is successfully created/joined, reload the page to cleanly load the app
+            window.location.reload();
+        }).catch(err => {
+            window.isRegistering = false;
+            document.getElementById('auth-error').textContent = getFriendlyErrorMessage(err);
+            document.getElementById('btn-register').disabled = false;
+            document.getElementById('btn-register').textContent = 'Create Account';
+        });
+    });
 });
+
+function hideLoader() {
+    const loader = document.getElementById('global-loader');
+    if (loader && loader.style.display !== 'none') {
+        loader.style.opacity = '0';
+        setTimeout(() => loader.style.display = 'none', 400);
+    }
+}
+
+// Helper to convert ugly Firebase JSON errors into clean text
+function getFriendlyErrorMessage(err) {
+    if (!err) return "An unknown error occurred.";
+    let msg = err.message || err.toString();
+    
+    // Try to parse if it's a raw JSON dump from the REST API
+    if (msg.startsWith('{')) {
+        try {
+            const parsed = JSON.parse(msg);
+            if (parsed.error && parsed.error.message) {
+                msg = parsed.error.message;
+            }
+        } catch(e) {}
+    }
+    
+    const code = err.code || msg;
+    
+    if (code.includes('INVALID_LOGIN_CREDENTIALS') || code.includes('auth/invalid-login-credentials') || code.includes('auth/wrong-password') || code.includes('auth/user-not-found')) {
+        return "Invalid email or password.";
+    }
+    if (code.includes('auth/email-already-in-use')) return "This email is already registered. Please sign in.";
+    if (code.includes('auth/weak-password')) return "Password should be at least 6 characters.";
+    if (code.includes('auth/invalid-email')) return "Please enter a valid email address.";
+    if (code.includes('auth/network-request-failed')) return "Network error. Please check your internet connection.";
+    if (code.includes('auth/too-many-requests')) return "Too many failed attempts. Please try again later.";
+    
+    // Remove the "Firebase: " prefix if it exists
+    if (msg.startsWith("Firebase: ")) {
+        msg = msg.replace("Firebase: ", "").split(" (auth")[0];
+    }
+    
+    // Fallback if it's still a massive JSON string or object
+    if (msg.length > 100) return "An error occurred. Please check your details and try again.";
+    
+    return msg;
+}
 
 function setupEventListeners(deferredPrompt) {
     // Header Actions
@@ -76,9 +310,19 @@ function setupEventListeners(deferredPrompt) {
         document.getElementById('install-help-modal').classList.add('hidden');
     });
 
-    // Dashboard Actions
-    document.getElementById('view-toggle-btn').addEventListener('click', toggleView);
-    document.getElementById('enable-notifs-btn').addEventListener('click', requestNotifPermission);
+    // Bottom Nav Actions
+    document.querySelectorAll('.nav-item').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+            const view = e.currentTarget.dataset.view;
+            switchView(view);
+        });
+    });
+
+    const notifBtn = document.getElementById('enable-notifs-btn');
+    notifBtn.addEventListener('click', requestNotifPermission);
+    if ('Notification' in window && Notification.permission === 'granted') {
+        notifBtn.classList.add('hidden');
+    }
 
     // Search Bar
     document.getElementById('search-bar').querySelector('.btn-icon').addEventListener('click', toggleSearch); // Back btn
@@ -89,11 +333,11 @@ function setupEventListeners(deferredPrompt) {
     // Sort
     document.getElementById('sort-select').addEventListener('change', render);
 
-    // Shift Bar
-    document.getElementById('shift-btn').addEventListener('click', toggleShift);
+    // Shift Bar - Manual button removed.
+    // document.getElementById('shift-btn').addEventListener('click', toggleShift);
 
-    // FAB
-    document.querySelector('.fab').addEventListener('click', () => checkAdmin(openAddModal));
+    // FAB — no PIN check needed, user is already authenticated
+    document.querySelector('.fab').addEventListener('click', () => openAddModal());
 
     // List Delegation
     document.getElementById('list').addEventListener('click', (e) => {
@@ -104,7 +348,7 @@ function setupEventListeners(deferredPrompt) {
         const id = parseInt(target.dataset.id);
 
         if (action === 'edit') {
-            checkAdmin(() => openModal(id));
+            openModal(id);
         } else if (action === 'dec') {
             mod(id, -1);
         } else if (action === 'inc') {
@@ -112,12 +356,10 @@ function setupEventListeners(deferredPrompt) {
         }
     });
 
-    // Modals - Setup
+    // Modals - Setup (simplified, no PIN)
     document.getElementById('welcome-modal').querySelector('.btn-save').addEventListener('click', completeSetup);
-    document.getElementById('setup-q-select').addEventListener('change', (e) => toggleCustom('setup', e.target.value));
 
     // Modals - Settings
-    document.getElementById('inp-q-select').addEventListener('change', (e) => toggleCustom('inp', e.target.value));
     document.getElementById('settings-modal').querySelector('.btn-delete').addEventListener('click', factoryReset);
     document.getElementById('settings-modal').querySelector('.btn-cancel').addEventListener('click', () => document.getElementById('settings-modal').classList.add('hidden'));
     document.getElementById('settings-modal').querySelector('.btn-save').addEventListener('click', saveSettings);
@@ -134,23 +376,36 @@ function setupEventListeners(deferredPrompt) {
 
     document.getElementById('import-file').addEventListener('change', importData);
 
-    const historyBtn = Array.from(settingsModal.querySelectorAll('.btn-outline')).find(b => b.textContent.includes('History'));
+    // Paste from Excel
+    document.getElementById('btn-paste-data').addEventListener('click', () => {
+        document.getElementById('paste-modal').classList.remove('hidden');
+        document.getElementById('paste-data-input').value = '';
+    });
+    document.getElementById('paste-cancel').addEventListener('click', () => document.getElementById('paste-modal').classList.add('hidden'));
+    document.getElementById('paste-import').addEventListener('click', importPastedData);
+
+    // Logout
+    document.getElementById('btn-logout').addEventListener('click', () => {
+        if (confirm('Sign out of StockOp?')) {
+            if (SHIFT_DATA.active) {
+                finalizeShift(true); // Auto end and save shift
+            }
+            logoutUser();
+            location.reload();
+        }
+    });
+
+    const historyBtn = Array.from(settingsModal.querySelectorAll('.btn-outline')).find(b => b.textContent.includes('Stock History'));
     if (historyBtn) historyBtn.addEventListener('click', showHistory);
+    
+    document.getElementById('btn-shift-reports').addEventListener('click', openShiftReports);
+    document.getElementById('btn-close-shift-reports').addEventListener('click', () => document.getElementById('shift-reports-modal').classList.add('hidden'));
 
 
     // Modals - Item
     document.getElementById('btn-delete').addEventListener('click', deleteItem);
     document.getElementById('modal').querySelector('.btn-cancel').addEventListener('click', closeModal);
     document.getElementById('modal').querySelector('.btn-save').addEventListener('click', saveItem);
-
-    // Modals - Pin
-    document.getElementById('pin-modal').querySelector('.btn-save').addEventListener('click', verifyPin);
-    document.getElementById('pin-modal').querySelector('.btn-cancel').addEventListener('click', closePin);
-    document.querySelector('[data-t="forgotPin"]').addEventListener('click', recoverPinFlow);
-
-    // Modals - Recovery
-    document.getElementById('recovery-modal').querySelector('.btn-cancel').addEventListener('click', () => document.getElementById('recovery-modal').classList.add('hidden'));
-    document.getElementById('recovery-modal').querySelector('.btn-save').addEventListener('click', verifyRecovery);
 
     // Modals - Report
     document.getElementById('report-modal').querySelectorAll('.btn-save')[0].addEventListener('click', () => downloadPDF(false));
@@ -171,22 +426,12 @@ function toggleCustom(prefix, val) {
 
 function completeSetup() {
     const name = document.getElementById('setup-name').value;
-    const pin = document.getElementById('setup-pin').value;
-    const qSelect = document.getElementById('setup-q-select').value;
-    const qCustom = document.getElementById('setup-q-custom').value;
-    const ans = document.getElementById('setup-ans').value;
 
-    if (!name || !pin || !ans) return showToast('Please fill all fields', 'error');
-    if (pin.length < 4) return showToast('PIN must be 4 digits', 'error');
+    if (!name) return showToast('Please enter a store name', 'error');
 
-    const finalQ = (qSelect === 'custom') ? qCustom : qSelect;
-    if (!finalQ) return showToast('Please enter a question', 'error');
-
-    localStorage.setItem('isSetup', 'true');
-    SETTINGS.name = name; localStorage.setItem('storeName', name);
-    SETTINGS.pin = pin; localStorage.setItem('storePin', pin);
-    SETTINGS.secQ = finalQ; localStorage.setItem('secQ', finalQ);
-    SETTINGS.secA = ans; localStorage.setItem('secA', ans);
+    SETTINGS.name = name;
+    localStorage.setItem('storeName', name);
+    saveStoreSettings({ name: name });
 
     document.title = name;
     document.getElementById('store-name-display').innerText = name;
@@ -215,8 +460,11 @@ function showToast(msg, type = 'info') {
     setTimeout(() => { toast.style.opacity = '0'; setTimeout(() => toast.remove(), 300); }, 3000);
 }
 
-let attempts = 0; let lastAdminTime = 0; const LOCKOUT_DURATION = 30000;
-let isDark = false;
+// checkAdmin is now a pass-through since we use Firebase Auth
+function checkAdmin(action) {
+    action();
+}
+
 function toggleTheme() {
     isDark = !isDark;
     document.body.setAttribute('data-theme', isDark ? 'dark' : 'light');
@@ -226,92 +474,28 @@ function toggleTheme() {
     showToast(isDark ? 'Dark Mode Active' : 'Light Mode Active');
 }
 
-function checkAdmin(action) {
-    if (Date.now() - lastAdminTime < 120000) { lastAdminTime = Date.now(); action(); return; }
-    callbackAction = action;
-    document.getElementById('inp-pin-attempt').value = '';
-    document.getElementById('pin-error').innerText = '';
-    document.getElementById('pin-modal').classList.remove('hidden');
-    document.getElementById('inp-pin-attempt').focus();
-}
 
-function verifyPin() {
-    const val = document.getElementById('inp-pin-attempt').value;
-    if (val === SETTINGS.pin) {
-        attempts = 0; lastAdminTime = Date.now();
-        document.getElementById('pin-modal').classList.add('hidden');
-        if (callbackAction) callbackAction();
-    } else {
-        attempts++; document.getElementById('pin-error').innerText = `Wrong PIN! Attempt ${attempts}/3`;
-        document.getElementById('inp-pin-attempt').value = '';
-        if (attempts >= 3) { document.getElementById('pin-modal').classList.add('hidden'); startLockout(LOCKOUT_DURATION); }
-    }
-}
-
-function startLockout(duration) {
-    const until = Date.now() + duration; localStorage.setItem('lockoutUntil', until);
-    const overlay = document.getElementById('lockout-screen'); overlay.classList.remove('hidden');
-    const txt = document.getElementById('lock-timer');
-    const interval = setInterval(() => {
-        const left = Math.ceil((until - Date.now()) / 1000);
-        txt.innerText = left;
-        if (left <= 0) { clearInterval(interval); overlay.classList.add('hidden'); attempts = 0; }
-    }, 1000);
-}
-
-function recoverPinFlow(e) {
-    if (e) e.preventDefault();
-    document.getElementById('pin-modal').classList.add('hidden');
-    document.getElementById('rec-question-display').innerText = SETTINGS.secQ;
-    document.getElementById('recovery-modal').classList.remove('hidden');
-    document.getElementById('inp-rec-attempt').value = '';
-}
-
-function verifyRecovery() {
-    const ans = document.getElementById('inp-rec-attempt').value;
-    if (SETTINGS.secA && ans.toLowerCase() === SETTINGS.secA.toLowerCase()) {
-        SETTINGS.pin = '0000'; localStorage.setItem('storePin', '0000');
-        showToast('PIN reset to 0000', 'success');
-        document.getElementById('recovery-modal').classList.add('hidden');
-    } else {
-        showToast('Incorrect Answer', 'error');
-    }
-}
-function closePin() { document.getElementById('pin-modal').classList.add('hidden'); }
+let isDark = false;
 
 function openSettings() {
-    checkAdmin(() => {
-        document.getElementById('inp-store-name').value = SETTINGS.name;
-        document.getElementById('inp-ans').value = SETTINGS.secA;
-        const select = document.getElementById('inp-q-select');
-        const custom = document.getElementById('inp-q-custom');
-        let isStandard = false;
-        for (let opt of select.options) {
-            if (opt.value === SETTINGS.secQ) { select.value = SETTINGS.secQ; isStandard = true; break; }
-        }
-        if (!isStandard) { select.value = 'custom'; custom.classList.remove('hidden'); custom.value = SETTINGS.secQ; }
-        else { custom.classList.add('hidden'); }
-        document.getElementById('settings-modal').classList.remove('hidden');
-        lucide.createIcons();
-    });
+    document.getElementById('inp-store-name').value = SETTINGS.name;
+    document.getElementById('settings-modal').classList.remove('hidden');
+    lucide.createIcons();
 }
 
 function saveSettings() {
     const n = document.getElementById('inp-store-name').value;
-    const p = document.getElementById('inp-admin-pin').value;
-    const qSelect = document.getElementById('inp-q-select').value;
-    const qCustom = document.getElementById('inp-q-custom').value;
-    const ans = document.getElementById('inp-ans').value;
 
-    const finalQ = (qSelect === 'custom') ? qCustom : qSelect;
-
-    if (n) { SETTINGS.name = n; localStorage.setItem('storeName', n); document.getElementById('store-name-display').innerText = n; document.title = n; }
-    if (p) { SETTINGS.pin = p; localStorage.setItem('storePin', p); }
-    if (finalQ) { SETTINGS.secQ = finalQ; localStorage.setItem('secQ', finalQ); }
-    if (ans) { SETTINGS.secA = ans; localStorage.setItem('secA', ans); }
+    if (n) {
+        SETTINGS.name = n;
+        localStorage.setItem('storeName', n);
+        document.getElementById('store-name-display').innerText = n;
+        document.title = n;
+        saveStoreSettings({ name: n });
+    }
 
     document.getElementById('settings-modal').classList.add('hidden');
-    lastAdminTime = 0; showToast('Settings Saved. Session Locked.', 'success');
+    showToast('Settings Saved', 'success');
 }
 
 function factoryReset() {
@@ -383,6 +567,49 @@ function importData(event) {
     event.target.value = '';
 }
 
+function importPastedData() {
+    try {
+        const text = document.getElementById('paste-data-input').value.trim();
+        if (!text) { showToast('Nothing to import', 'error'); return; }
+
+        const rows = text.split('\n');
+        let addedCount = 0;
+        let nextId = INVENTORY.length ? Math.max(...INVENTORY.map(i => i.id)) + 1 : 1;
+
+        for (let i = 0; i < rows.length; i++) {
+            if (!rows[i].trim()) continue;
+
+            // Split by tab (from Excel/Sheets copy-paste) or comma (fallback)
+            const cols = rows[i].includes('\t')
+                ? rows[i].split('\t').map(c => c.trim())
+                : rows[i].split(/,(?=(?:(?:[^"]*"){2})*[^"]*$)/).map(c => c.replace(/["\r]/g, '').trim());
+
+            const item = {
+                id: nextId++,
+                name: cols[0] || 'Unknown',
+                sku: cols[1] || '',
+                cat: cols[2] || 'Other',
+                price: parseFloat(cols[3]) || 0,
+                count: parseInt(cols[4]) || 0,
+                cost: parseFloat(cols[5]) || 0,
+                expiry: cols[6] || ''
+            };
+
+            if (item.name !== 'Unknown') {
+                saveItemToDB(item);
+                addedCount++;
+            }
+        }
+
+        showToast(`${addedCount} Items Imported to Cloud!`, 'success');
+        document.getElementById('paste-modal').classList.add('hidden');
+        document.getElementById('settings-modal').classList.add('hidden');
+    } catch (err) {
+        console.error(err);
+        showToast('Error parsing data', 'error');
+    }
+}
+
 // --- SECURITY UTILS ---
 function escapeHtml(text) {
     if (!text) return '';
@@ -407,9 +634,22 @@ function sanitizeCSV(text) {
 // --- RENDER ---
 let activeCat = 'All'; let callbackAction = null;
 function render() {
-    const list = document.getElementById('list'); list.innerHTML = '';
+    const list = document.getElementById('list');
+    list.innerHTML = '';
+    let displayedCount = 0;
 
-    if (INVENTORY.length === 0) {
+    if (INVENTORY.length === 0 && document.getElementById('search-input').value === '') {
+        list.innerHTML = `
+            <div class="empty-state" style="padding: 60px 20px; display: flex; flex-direction: column; align-items: center; justify-content: center; opacity: 0; animation: fadeIn 0.4s ease forwards;">
+                <div style="width: 80px; height: 80px; background: var(--bg-input); border-radius: 50%; display: flex; align-items: center; justify-content: center; margin-bottom: 24px; color: var(--text-muted);">
+                    <i data-lucide="inbox" style="width: 40px; height: 40px;"></i>
+                </div>
+                <h3 style="margin: 0 0 8px; font-size: 18px; color: var(--text-main);">Your store is empty</h3>
+                <p style="margin: 0 0 24px; font-size: 14px; max-width: 250px; line-height: 1.5;">Start building your inventory by tapping the + button below.</p>
+            </div>
+        `;
+        lucide.createIcons();
+    } else if (INVENTORY.length === 0) {
         const t = TRANSLATIONS[LANG];
         list.innerHTML = `
             <div class="empty-state">
@@ -475,7 +715,7 @@ function render() {
 
         // Profit Margin
         let profitHtml = '';
-        if (i.cost && i.price > i.cost) {
+        if (currentUserRole !== 'employee' && i.cost && i.price > i.cost) {
             const margin = Math.round(((i.price - i.cost) / i.price) * 100);
             profitHtml = `<span class="badge badge-profit">${margin}% margin</span>`;
         }
@@ -484,8 +724,11 @@ function render() {
 
         // Use data attributes for delegation
         row.innerHTML = `
-            <div class="info" data-action="edit" data-id="${i.id}">
-                <span class="name">${escapeHtml(i.name)} ${expBadge} ${lowBadge}</span>
+            <div class="info" data-action="edit" data-id="${i.id}" style="cursor:pointer;" title="Tap to Edit">
+                <div style="display:flex; align-items:center; gap:6px;">
+                    <span class="name">${escapeHtml(i.name)} ${expBadge} ${lowBadge}</span>
+                    <i data-lucide="edit-3" style="width:14px; color:var(--text-muted); opacity:0.6;"></i>
+                </div>
                 ${skuHtml}
                 <div class="meta">
                     <span class="badge">${escapeHtml(i.cat)}</span>
@@ -493,16 +736,21 @@ function render() {
                     ${profitHtml}
                 </div>
             </div>
-            <div class="stepper">
-                <button class="step-btn minus" data-action="dec" data-id="${i.id}">
-                    <i data-lucide="minus"></i>
+            <div class="stepper" style="display:flex; align-items:center; gap:8px;">
+                <button class="btn-icon" style="height:32px; width:32px; padding:0; justify-content:center; border-color:var(--primary); color:var(--primary)" data-action="cart" data-id="${i.id}" title="Add to POS Cart">
+                    <i data-lucide="shopping-cart" style="width:16px; height:16px;"></i>
                 </button>
-                <div class="count-val" data-action="edit" data-id="${i.id}">
-                    ${i.count}
+                <div style="display:flex; align-items:center; border:1px solid var(--border-color); border-radius:8px; overflow:hidden; height:32px;">
+                    <button class="step-btn minus" data-action="dec" data-id="${i.id}" style="border:none; width:32px; height:100%; border-radius:0;">
+                        <i data-lucide="minus" style="width:14px; height:14px;"></i>
+                    </button>
+                    <div class="count-val" data-action="edit" data-id="${i.id}" style="display:flex; align-items:center; justify-content:center; width:36px; height:100%; border-left:1px solid var(--border-color); border-right:1px solid var(--border-color); font-size:14px;">
+                        ${i.count}
+                    </div>
+                    <button class="step-btn plus" data-action="inc" data-id="${i.id}" style="border:none; width:32px; height:100%; border-radius:0;">
+                        <i data-lucide="plus" style="width:14px; height:14px;"></i>
+                    </button>
                 </div>
-                <button class="step-btn plus" data-action="inc" data-id="${i.id}">
-                    <i data-lucide="plus"></i>
-                </button>
             </div>`;
 
         list.appendChild(row);
@@ -515,9 +763,8 @@ window.setActiveCat = c => { activeCat = c; render(); };
 window.mod = (id, d) => {
     const i = INVENTORY.find(x => x.id == id);
     if (i && i.count + d >= 0) {
-        i.count += d;
-        localStorage.setItem('inventory', JSON.stringify(INVENTORY));
-        render();
+        updateItemCountInDB(id, i.count + d);
+        // We don't render() here, because the Firebase listener will trigger a render automatically
     }
 };
 
@@ -531,21 +778,32 @@ window.openModal = (id) => {
         document.getElementById('inp-name').value = i.name;
         document.getElementById('inp-sku').value = i.sku || '';
         document.getElementById('inp-cat').value = i.cat;
+        document.getElementById('inp-supplier').value = i.supplier || '';
         document.getElementById('inp-price').value = i.price;
         document.getElementById('inp-cost').value = i.cost || '';
         document.getElementById('inp-count').value = i.count;
         document.getElementById('inp-expiry').value = i.expiry;
-        del.classList.remove('hidden');
+        if (currentUserRole !== 'employee') {
+            del.classList.remove('hidden');
+        } else {
+            del.classList.add('hidden');
+        }
     } else {
         document.getElementById('edit-id').value = '';
         document.getElementById('inp-name').value = '';
         document.getElementById('inp-sku').value = '';
         document.getElementById('inp-cat').value = '';
+        document.getElementById('inp-supplier').value = '';
         document.getElementById('inp-price').value = '';
         document.getElementById('inp-cost').value = '';
         document.getElementById('inp-count').value = 0;
         document.getElementById('inp-expiry').value = '';
         del.classList.add('hidden');
+    }
+
+    const costGroup = document.getElementById('inp-cost').closest('.form-group');
+    if (costGroup) {
+        costGroup.style.display = (currentUserRole === 'employee') ? 'none' : 'block';
     }
 };
 window.closeModal = () => document.getElementById('modal').classList.add('hidden');
@@ -556,6 +814,7 @@ window.saveItem = () => {
         name: document.getElementById('inp-name').value,
         sku: document.getElementById('inp-sku').value || '',
         cat: document.getElementById('inp-cat').value || 'Other',
+        supplier: document.getElementById('inp-supplier').value || '',
         price: parseFloat(document.getElementById('inp-price').value) || 0,
         cost: parseFloat(document.getElementById('inp-cost').value) || 0,
         count: parseInt(document.getElementById('inp-count').value) || 0,
@@ -563,59 +822,88 @@ window.saveItem = () => {
     };
     const isEdit = !!id;
     if (isEdit) {
-        INVENTORY[INVENTORY.findIndex(i => i.id == id)] = item;
         logHistory('edited', item.name, `Count: ${item.count}, Price: KSh ${item.price}`);
     } else {
-        INVENTORY.unshift(item);
         logHistory('added', item.name, `Count: ${item.count}, Price: KSh ${item.price}`);
     }
-    localStorage.setItem('inventory', JSON.stringify(INVENTORY));
-    showToast('Item Saved', 'success');
-    closeModal(); render();
+    saveItemToDB(item);
+    showToast('Item Saved to Cloud', 'success');
+    closeModal();
 };
 window.deleteItem = () => {
     if (confirm('Delete?')) {
         const id = document.getElementById('edit-id').value;
         const item = INVENTORY.find(i => i.id == id);
         logHistory('deleted', item ? item.name : 'Unknown item');
-        INVENTORY = INVENTORY.filter(i => i.id != id);
-        localStorage.setItem('inventory', JSON.stringify(INVENTORY));
-        showToast('Item Deleted', 'error'); closeModal(); render();
+        deleteItemFromDB(id);
+        showToast('Item Deleted from Cloud', 'error'); closeModal();
     }
 };
-window.toggleShift = () => {
+// --- AUTONOMOUS SHIFT LOGIC ---
+function finalizeShift(isManual) {
+    if (!SHIFT_DATA.active) return;
+    
+    const endTime = isManual ? new Date().toISOString() : new Date(SHIFT_DATA.lastActivity).toISOString();
+    
+    const reportData = {
+        employeeEmail: firebase.auth().currentUser.email,
+        startTime: SHIFT_DATA.startTime,
+        endTime: endTime,
+        actions: SHIFT_DATA.actions,
+        inventoryValue: INVENTORY.reduce((sum, i) => sum + (i.count * i.price), 0)
+    };
+    
+    // Save to Cloud
+    saveShiftReport(reportData).catch(console.error);
+    
+    // Clear Local
+    SHIFT_DATA.active = false;
+    SHIFT_DATA.startTime = null;
+    SHIFT_DATA.lastActivity = null;
+    SHIFT_DATA.actions = [];
+    localStorage.setItem('shiftData', JSON.stringify(SHIFT_DATA));
+    
+    return reportData;
+}
+
+function checkShiftTimeout() {
+    if (!SHIFT_DATA.active) return;
+    const now = Date.now();
+    const timeoutMs = 12 * 60 * 60 * 1000; // 12 hours
+    if (SHIFT_DATA.lastActivity && (now - SHIFT_DATA.lastActivity > timeoutMs)) {
+        finalizeShift(false);
+        showToast('Shift ended due to inactivity.', 'info');
+        renderShiftUI();
+    }
+}
+
+// Run the check every minute
+setInterval(checkShiftTimeout, 60000);
+
+function registerShiftActivity() {
+    checkShiftTimeout();
     if (!SHIFT_DATA.active) {
+        // Auto-start
         SHIFT_DATA.active = true;
         SHIFT_DATA.startTime = new Date().toISOString();
         SHIFT_DATA.actions = [];
-        localStorage.setItem('shiftData', JSON.stringify(SHIFT_DATA));
-        showToast('Shift Started', 'success');
-        renderShiftUI();
-    } else {
-        document.getElementById('report-modal').classList.remove('hidden');
-        lucide.createIcons();
+        showToast('Shift Auto-Started', 'success');
     }
-};
+    SHIFT_DATA.lastActivity = Date.now();
+    localStorage.setItem('shiftData', JSON.stringify(SHIFT_DATA));
+    renderShiftUI();
+}
 
 function renderShiftUI() {
-    const btn = document.getElementById('shift-btn');
     const status = document.getElementById('shift-status');
-    const finalBtn = document.getElementById('btn-finish-shift-final');
     const t = TRANSLATIONS[LANG];
 
     if (SHIFT_DATA.active) {
-        btn.innerHTML = `<i data-lucide="check-circle" style="width:16px"></i> <span data-t="finishShift">${t.finishShift}</span>`;
-        btn.className = 'btn btn-save';
         status.style.display = 'block';
-        if (finalBtn) finalBtn.style.display = 'flex';
         updateShiftTimer();
     } else {
-        btn.innerHTML = `<i data-lucide="play" style="width:16px"></i> <span data-t="startShift">${t.startShift}</span>`;
-        btn.className = 'btn btn-save';
         status.style.display = 'none';
-        if (finalBtn) finalBtn.style.display = 'none';
     }
-    lucide.createIcons();
 }
 
 let shiftInterval = null;
@@ -637,16 +925,11 @@ function updateShiftTimer() {
 
 window.confirmEndShift = () => {
     if (confirm(TRANSLATIONS[LANG].confirmEndShift)) {
-        // Download final report
-        downloadPDF(true); // Flag to indicate shift report
-
-        SHIFT_DATA.active = false;
-        SHIFT_DATA.startTime = null;
-        SHIFT_DATA.actions = [];
-        localStorage.setItem('shiftData', JSON.stringify(SHIFT_DATA));
-
+        const report = finalizeShift(true);
+        downloadPDF(true, report);
+        
         document.getElementById('report-modal').classList.add('hidden');
-        showToast('Shift Ended & Report Downloaded', 'success');
+        showToast('Shift Ended & Report Saved', 'success');
         renderShiftUI();
     }
 };
@@ -684,7 +967,7 @@ window.startVoice = () => {
 };
 
 // --- REPORTS ---
-window.downloadPDF = async (isShiftReport = false) => {
+window.downloadPDF = async (isShiftReport = false, pastReport = null) => {
     const { jsPDF } = window.jspdf;
     const doc = new jsPDF();
     const t = TRANSLATIONS[LANG];
@@ -693,25 +976,34 @@ window.downloadPDF = async (isShiftReport = false) => {
     doc.text(SETTINGS.name + (isShiftReport ? ' - Shift Report' : ' - Stock Report'), 14, 20);
 
     doc.setFontSize(10);
-    doc.text('Date: ' + new Date().toLocaleString(), 14, 28);
+    doc.text('Generated: ' + new Date().toLocaleString(), 14, 28);
 
-    if (isShiftReport && SHIFT_DATA.startTime) {
-        doc.text('Shift Started: ' + new Date(SHIFT_DATA.startTime).toLocaleString(), 14, 34);
-        doc.text('Shift Ended: ' + new Date().toLocaleString(), 14, 40);
+    if (isShiftReport) {
+        // If pastReport is provided (from cloud), use it. Otherwise use current global SHIFT_DATA (fallback).
+        const sTime = pastReport ? pastReport.startTime : SHIFT_DATA.startTime;
+        const eTime = pastReport ? pastReport.endTime : new Date().toISOString();
+        const actions = pastReport ? pastReport.actions : SHIFT_DATA.actions;
+        const emp = pastReport ? pastReport.employeeEmail : (firebase.auth().currentUser ? firebase.auth().currentUser.email : '');
+
+        if (emp) doc.text('Employee: ' + emp, 14, 34);
+        if (sTime) doc.text('Shift Started: ' + new Date(sTime).toLocaleString(), 14, 40);
+        doc.text('Shift Ended: ' + new Date(eTime).toLocaleString(), 14, 46);
 
         // Shift Activity Table
         doc.setFontSize(12);
-        doc.text('Shift Activity Summary', 14, 50);
+        doc.text('Shift Activity Summary', 14, 56);
         doc.autoTable({
             head: [['Time', 'Action', 'Item', 'Details']],
-            body: SHIFT_DATA.actions.map(a => [new Date(a.time).toLocaleTimeString(), a.action, a.item, a.details]),
-            startY: 55
+            body: actions.map(a => [new Date(a.time).toLocaleTimeString(), a.action, a.item, a.details]),
+            startY: 61
         });
 
-        doc.addPage();
-        doc.setFontSize(12);
-        doc.text('Final Inventory State', 14, 20);
-        doc.autoTable({ head: [['Item', 'SKU', 'Category', 'Count', 'Price', 'Value']], body: INVENTORY.map(i => [i.name, i.sku || '-', i.cat, i.count, 'KSh ' + i.price, 'KSh ' + (i.count * i.price)]), startY: 25 });
+        if (!pastReport) { // Only show final inventory state for current live shift
+            doc.addPage();
+            doc.setFontSize(12);
+            doc.text('Final Inventory State', 14, 20);
+            doc.autoTable({ head: [['Item', 'SKU', 'Category', 'Count', 'Price', 'Value']], body: INVENTORY.map(i => [i.name, i.sku || '-', i.cat, i.count, 'KSh ' + i.price, 'KSh ' + (i.count * i.price)]), startY: 25 });
+        }
     } else {
         doc.autoTable({ head: [['Item', 'SKU', 'Category', 'Count', 'Price', 'Value']], body: INVENTORY.map(i => [i.name, i.sku || '-', i.cat, i.count, 'KSh ' + i.price, 'KSh ' + (i.count * i.price)]), startY: 35 });
     }
@@ -743,39 +1035,411 @@ window.downloadCSV = () => {
     showToast('CSV Downloaded', 'success');
 };
 
-// --- DASHBOARD & NOTIFICATIONS ---
-let isDashboard = false;
-function toggleView() {
-    isDashboard = !isDashboard;
-    const list = document.getElementById('list');
-    const dash = document.getElementById('dashboard-view');
-    const fab = document.querySelector('.fab');
-    const sort = document.getElementById('sort-select').parentElement; // Sort container
-    const tabs = document.getElementById('tabs');
-    const btnIcon = document.getElementById('view-toggle-btn').querySelector('i');
+// --- VIEWS & NAVIGATION ---
+function switchView(viewId) {
+    currentView = viewId;
+    localStorage.setItem('currentView', viewId);
+    
+    document.querySelectorAll('.view-section').forEach(el => el.classList.remove('active'));
+    document.querySelectorAll('.nav-item').forEach(btn => {
+        if (btn.dataset.view === viewId) btn.classList.add('active');
+        else btn.classList.remove('active');
+    });
 
-    if (isDashboard) {
-        list.classList.add('hidden');
-        dash.classList.remove('hidden');
-        fab.classList.add('hidden');
-        sort.classList.add('hidden');
-        tabs.classList.add('hidden');
-        btnIcon.setAttribute('data-lucide', 'list');
-        renderDashboard();
-    } else {
-        list.classList.remove('hidden');
-        dash.classList.add('hidden');
-        fab.classList.remove('hidden');
-        sort.classList.remove('hidden');
-        tabs.classList.remove('hidden');
-        btnIcon.setAttribute('data-lucide', 'layout-dashboard');
+    // Hide all containers
+    const containers = ['list', 'dashboard-view', 'pos-view', 'suppliers-view'];
+    containers.forEach(c => document.getElementById(c).classList.add('hidden'));
+
+    // Show selected container
+    if (viewId === 'list') {
+        document.getElementById('list').classList.remove('hidden');
+        document.getElementById('main-fab').classList.remove('hidden');
+        document.getElementById('sort-select').parentElement.classList.remove('hidden');
+        document.getElementById('tabs').classList.remove('hidden');
+        const statsBanner = document.getElementById('stats-banner');
+        if (statsBanner) statsBanner.classList.remove('hidden');
         render();
+    } else {
+        document.getElementById('main-fab').classList.add('hidden');
+        document.getElementById('sort-select').parentElement.classList.add('hidden');
+        document.getElementById('tabs').classList.add('hidden');
+        const statsBanner = document.getElementById('stats-banner');
+        if (statsBanner) statsBanner.classList.add('hidden');
+        
+        if (viewId === 'dashboard') {
+            document.getElementById('dashboard-view').classList.remove('hidden');
+            renderDashboard();
+        } else if (viewId === 'pos') {
+            document.getElementById('pos-view').classList.remove('hidden');
+            renderPOS();
+        } else if (viewId === 'suppliers') {
+            document.getElementById('suppliers-view').classList.remove('hidden');
+            renderSuppliers();
+        }
     }
-    lucide.createIcons();
 }
 
+// --- SUPPLIERS LOGIC ---
+window.updateSupplierDropdown = () => {
+    const dropdown = document.getElementById('inp-supplier');
+    if (!dropdown) return;
+    const currentVal = dropdown.value;
+    dropdown.innerHTML = '<option value="">-- No Supplier --</option>';
+    SUPPLIERS.forEach(s => {
+        dropdown.innerHTML += `<option value="${escapeHtml(s.name)}">${escapeHtml(s.name)}</option>`;
+    });
+    dropdown.value = currentVal;
+};
+
+window.renderSuppliers = () => {
+    const list = document.getElementById('suppliers-list');
+    list.innerHTML = '';
+    if (SUPPLIERS.length === 0) {
+        list.innerHTML = '<p style="text-align:center; color:var(--text-muted); font-size:13px; margin:40px 0">No suppliers added yet.</p>';
+        return;
+    }
+    SUPPLIERS.forEach(s => {
+        const card = document.createElement('div');
+        card.className = 'supplier-card';
+        card.innerHTML = `
+            <div class="supplier-info">
+                <h4>${escapeHtml(s.name)}</h4>
+                <p><i data-lucide="phone" style="width:12px"></i> ${escapeHtml(s.phone || 'N/A')}</p>
+                <p><i data-lucide="mail" style="width:12px"></i> ${escapeHtml(s.email || 'N/A')}</p>
+            </div>
+            <button class="btn-icon edit-supplier-btn" style="color:var(--primary); border-color:var(--primary)">
+                <i data-lucide="edit-3"></i>
+            </button>
+        `;
+        card.querySelector('.edit-supplier-btn').addEventListener('click', () => openSupplierModal(s.id));
+        list.appendChild(card);
+    });
+    lucide.createIcons();
+};
+
+window.openSupplierModal = (id) => {
+    const modal = document.getElementById('supplier-modal');
+    const delBtn = document.getElementById('btn-delete-supplier');
+    if (id) {
+        const s = SUPPLIERS.find(x => x.id == id);
+        document.getElementById('edit-supplier-id').value = s.id;
+        document.getElementById('inp-supp-name').value = s.name;
+        document.getElementById('inp-supp-phone').value = s.phone || '';
+        document.getElementById('inp-supp-email').value = s.email || '';
+        document.getElementById('inp-supp-notes').value = s.notes || '';
+        document.getElementById('supplier-modal-title').innerText = 'Edit Supplier';
+        if (currentUserRole !== 'employee') delBtn.classList.remove('hidden');
+        else delBtn.classList.add('hidden');
+    } else {
+        document.getElementById('edit-supplier-id').value = '';
+        document.getElementById('inp-supp-name').value = '';
+        document.getElementById('inp-supp-phone').value = '';
+        document.getElementById('inp-supp-email').value = '';
+        document.getElementById('inp-supp-notes').value = '';
+        document.getElementById('supplier-modal-title').innerText = 'Add Supplier';
+        delBtn.classList.add('hidden');
+    }
+    modal.classList.remove('hidden');
+};
+
+document.getElementById('btn-add-supplier').addEventListener('click', () => openSupplierModal());
+
+document.getElementById('btn-save-supplier').addEventListener('click', () => {
+    const id = document.getElementById('edit-supplier-id').value;
+    const s = {
+        id: id || Date.now().toString(),
+        name: document.getElementById('inp-supp-name').value,
+        phone: document.getElementById('inp-supp-phone').value,
+        email: document.getElementById('inp-supp-email').value,
+        notes: document.getElementById('inp-supp-notes').value
+    };
+    if (!s.name) return showToast('Name required', 'error');
+    
+    saveSupplierToDB(s).then(() => {
+        showToast('Supplier Saved', 'success');
+        document.getElementById('supplier-modal').classList.add('hidden');
+    }).catch(e => showToast(e.message, 'error'));
+});
+
+document.getElementById('btn-delete-supplier').addEventListener('click', () => {
+    if (confirm('Delete this supplier?')) {
+        const id = document.getElementById('edit-supplier-id').value;
+        deleteSupplierFromDB(id).then(() => {
+            showToast('Supplier Deleted', 'error');
+            document.getElementById('supplier-modal').classList.add('hidden');
+        }).catch(e => showToast(e.message, 'error'));
+    }
+});
+
+// --- POS LOGIC ---
+window.renderPOS = () => {
+    // POS Cart rendering
+    const list = document.getElementById('pos-cart-items');
+    list.innerHTML = '';
+    let totalItems = 0;
+    let totalVal = 0;
+    
+    if (POS_CART.length === 0) {
+        list.innerHTML = '<p style="text-align:center; color:var(--text-muted); font-size:13px; margin:40px 0">Cart is empty.<br>Scan an item or use Inventory view to add.</p>';
+    } else {
+        POS_CART.forEach((cItem, index) => {
+            totalItems += cItem.qty;
+            totalVal += (cItem.qty * cItem.price);
+            const row = document.createElement('div');
+            row.style = 'display:flex; justify-content:space-between; align-items:center; padding:12px 0; border-bottom:1px solid var(--border-color);';
+            row.innerHTML = `
+                <div>
+                    <div style="font-weight:600; font-size:14px">${escapeHtml(cItem.name)}</div>
+                    <div style="color:var(--text-muted); font-size:12px">KSh ${cItem.price} &times; ${cItem.qty} = <strong>KSh ${cItem.qty * cItem.price}</strong></div>
+                </div>
+                <div style="display:flex; align-items:center; border:1px solid var(--border-color); border-radius:8px; overflow:hidden; height:32px;">
+                    <button class="step-btn minus" style="border:none; width:32px; height:100%; border-radius:0;"><i data-lucide="minus" style="width:14px; height:14px;"></i></button>
+                    <div class="count-val" style="display:flex; align-items:center; justify-content:center; width:36px; height:100%; border-left:1px solid var(--border-color); border-right:1px solid var(--border-color); font-size:14px;">${cItem.qty}</div>
+                    <button class="step-btn plus" style="border:none; width:32px; height:100%; border-radius:0;"><i data-lucide="plus" style="width:14px; height:14px;"></i></button>
+                </div>
+            `;
+            
+            row.querySelector('.minus').addEventListener('click', () => window.modCart(index, -1));
+            row.querySelector('.plus').addEventListener('click', () => window.modCart(index, 1));
+            
+            list.appendChild(row);
+        });
+    }
+    
+    document.getElementById('pos-total-items').innerText = totalItems;
+    document.getElementById('pos-total-val').innerText = 'KSh ' + totalVal.toLocaleString();
+    lucide.createIcons();
+};
+
+window.modCart = (index, delta) => {
+    if (index >= 0 && index < POS_CART.length) {
+        POS_CART[index].qty += delta;
+        // Verify inventory limits
+        const dbItem = INVENTORY.find(i => i.id == POS_CART[index].id);
+        if (dbItem && POS_CART[index].qty > dbItem.count) {
+            POS_CART[index].qty = dbItem.count; // Max out at available inventory
+            showToast('Not enough stock available', 'error');
+        }
+        if (POS_CART[index].qty <= 0) {
+            POS_CART.splice(index, 1);
+        }
+        localStorage.setItem('posCart', JSON.stringify(POS_CART));
+        renderPOS();
+    }
+};
+
+window.addToCart = (id) => {
+    const item = INVENTORY.find(i => i.id == id);
+    if (!item) return;
+    if (item.count <= 0) return showToast('Item out of stock', 'error');
+    
+    const exist = POS_CART.find(c => c.id == id);
+    if (exist) {
+        if (exist.qty < item.count) {
+            exist.qty += 1;
+            showToast('Added to Cart', 'success');
+        } else {
+            showToast('Not enough stock available', 'error');
+        }
+    } else {
+        POS_CART.push({ id: item.id, name: item.name, price: item.price, qty: 1 });
+        showToast('Added to Cart', 'success');
+    }
+    localStorage.setItem('posCart', JSON.stringify(POS_CART));
+    if (currentView === 'pos') renderPOS();
+};
+
+document.getElementById('btn-custom-item').addEventListener('click', () => {
+    const name = prompt("Enter custom item name:", "Custom Item");
+    if (!name) return;
+    const priceStr = prompt("Enter custom item price:", "0");
+    if (!priceStr) return;
+    
+    const price = parseFloat(priceStr);
+    if (isNaN(price) || price < 0) return showToast("Invalid price", "error");
+    
+    POS_CART.push({
+        id: 'custom_' + Date.now(),
+        name: name,
+        price: price,
+        qty: 1
+    });
+    
+    localStorage.setItem('posCart', JSON.stringify(POS_CART));
+    renderPOS();
+    showToast("Added custom item", "success");
+});
+
+let LAST_RECEIPT = null;
+
+document.getElementById('btn-checkout').addEventListener('click', () => {
+    if (POS_CART.length === 0) return showToast('Cart is empty', 'error');
+    
+    const totalVal = POS_CART.reduce((s, i) => s + (i.qty * i.price), 0);
+    const btn = document.getElementById('btn-checkout');
+    btn.disabled = true;
+    btn.textContent = 'Processing...';
+    
+    processCheckout(POS_CART, totalVal).then(() => {
+        btn.disabled = false;
+        btn.textContent = 'Checkout';
+        
+        // Save receipt data before clearing cart
+        LAST_RECEIPT = { items: [...POS_CART], total: totalVal, date: new Date().toLocaleString() };
+        
+        document.getElementById('checkout-modal').classList.remove('hidden');
+        
+        // Check for Low Stock for Emails
+        const lowItems = [];
+        POS_CART.forEach(c => {
+            const dbItem = INVENTORY.find(i => i.id == c.id);
+            if (dbItem && (dbItem.count - c.qty) <= 0) {
+                lowItems.push(dbItem.name);
+            }
+        });
+        if (lowItems.length > 0) {
+            sendLowStockEmail(lowItems);
+        }
+        
+        POS_CART = []; // Clear cart
+        localStorage.setItem('posCart', JSON.stringify(POS_CART));
+        if (currentView === 'pos') renderPOS();
+    }).catch(e => {
+        btn.disabled = false;
+        btn.textContent = 'Checkout';
+        showToast(e.message, 'error');
+    });
+});
+
+document.getElementById('btn-checkout-done').addEventListener('click', () => {
+    document.getElementById('checkout-modal').classList.add('hidden');
+});
+
+document.getElementById('btn-print-receipt').addEventListener('click', () => {
+    if (!LAST_RECEIPT) return showToast('No receipt found', 'error');
+    if (!window.jspdf || !window.jspdf.jsPDF) return showToast('PDF Library not loaded', 'error');
+    
+    const doc = new window.jspdf.jsPDF({
+        orientation: 'portrait',
+        unit: 'mm',
+        format: 'a5'
+    });
+    
+    const pw = doc.internal.pageSize.width;
+    const margin = 12;
+    
+    // Header bar
+    doc.setFillColor(59, 130, 246);
+    doc.rect(0, 0, pw, 28, 'F');
+    
+    doc.setTextColor(255, 255, 255);
+    doc.setFontSize(18);
+    doc.setFont("helvetica", "bold");
+    doc.text(SETTINGS.name || "My Store", pw / 2, 13, { align: 'center' });
+    
+    doc.setFontSize(9);
+    doc.setFont("helvetica", "normal");
+    doc.text("SALES RECEIPT", pw / 2, 21, { align: 'center' });
+    
+    // Meta info
+    doc.setTextColor(100, 100, 100);
+    doc.setFontSize(9);
+    doc.text("Date: " + LAST_RECEIPT.date, margin, 38);
+    doc.text("Receipt #: " + Date.now().toString(36).toUpperCase(), pw - margin, 38, { align: 'right' });
+    
+    doc.setDrawColor(220, 220, 220);
+    doc.setLineWidth(0.3);
+    doc.line(margin, 42, pw - margin, 42);
+    
+    // Items table
+    const tableData = LAST_RECEIPT.items.map(i => [
+        i.name,
+        i.qty.toString(),
+        "KSh " + i.price.toLocaleString(),
+        "KSh " + (i.price * i.qty).toLocaleString()
+    ]);
+    
+    doc.autoTable({
+        startY: 46,
+        margin: { left: margin, right: margin },
+        head: [['Item', 'Qty', 'Price', 'Subtotal']],
+        body: tableData,
+        theme: 'striped',
+        headStyles: { fillColor: [243, 244, 246], textColor: [50, 50, 50], fontStyle: 'bold', fontSize: 9 },
+        bodyStyles: { fontSize: 9, textColor: [30, 30, 30] },
+        alternateRowStyles: { fillColor: [250, 250, 252] },
+        columnStyles: {
+            0: { halign: 'left' },
+            1: { halign: 'center', cellWidth: 16 },
+            2: { halign: 'right', cellWidth: 28 },
+            3: { halign: 'right', cellWidth: 30 }
+        }
+    });
+    
+    let finalY = doc.lastAutoTable.finalY + 4;
+    
+    // Total box
+    doc.setFillColor(243, 244, 246);
+    doc.roundedRect(pw - margin - 60, finalY, 60, 14, 2, 2, 'F');
+    
+    doc.setTextColor(80, 80, 80);
+    doc.setFontSize(9);
+    doc.setFont("helvetica", "normal");
+    doc.text("TOTAL", pw - margin - 55, finalY + 9);
+    
+    doc.setTextColor(30, 30, 30);
+    doc.setFontSize(13);
+    doc.setFont("helvetica", "bold");
+    doc.text("KSh " + LAST_RECEIPT.total.toLocaleString(), pw - margin - 3, finalY + 9, { align: 'right' });
+    
+    finalY += 24;
+    
+    // Footer
+    doc.setDrawColor(220, 220, 220);
+    doc.line(margin, finalY, pw - margin, finalY);
+    finalY += 8;
+    
+    doc.setTextColor(150, 150, 150);
+    doc.setFontSize(9);
+    doc.setFont("helvetica", "italic");
+    doc.text("Thank you for your business!", pw / 2, finalY, { align: 'center' });
+    
+    doc.setFontSize(7);
+    doc.text("Powered by StockOp", pw / 2, finalY + 6, { align: 'center' });
+    
+    doc.save("Receipt_" + Date.now() + ".pdf");
+    
+    setTimeout(() => {
+        document.getElementById('checkout-modal').classList.add('hidden');
+    }, 500);
+});
+
+// --- EMAIL ALERTS LOGIC ---
+window.sendLowStockEmail = (itemNames) => {
+    // Requires EmailJS initialization
+    // For this to work in production, owner needs to configure EmailJS keys.
+    // Assuming a placeholder setup for now:
+    try {
+        emailjs.init("YOUR_PUBLIC_KEY"); // Placeholder
+        const templateParams = {
+            to_name: SETTINGS.name + " Owner",
+            message: "The following items have just run out of stock during checkout:\n\n" + itemNames.join("\n"),
+            reply_to: "no-reply@stockop.app"
+        };
+        
+        emailjs.send('YOUR_SERVICE_ID', 'YOUR_TEMPLATE_ID', templateParams)
+            .then(function(response) {
+                console.log('Email sent!', response.status, response.text);
+            }, function(error) {
+                console.log('Email failed...', error);
+            });
+    } catch (e) {
+        console.warn('EmailJS not configured yet:', e);
+    }
+};
+
 function renderDashboard() {
-    if (!isDashboard) return;
+    if (currentView !== 'dashboard') return;
 
     // Aggregates
     const totalVal = INVENTORY.reduce((sum, i) => sum + (i.count * i.price), 0);
@@ -854,13 +1518,15 @@ function logHistory(action, itemName, details = '') {
     if (HISTORY.length > 100) HISTORY = HISTORY.slice(0, 100); // Keep last 100
     localStorage.setItem('stockHistory', JSON.stringify(HISTORY));
 
+    registerShiftActivity(); // Record activity to maintain/start shift
+
     if (SHIFT_DATA.active) {
         SHIFT_DATA.actions.push(entry);
         localStorage.setItem('shiftData', JSON.stringify(SHIFT_DATA));
     }
 }
 
-window.showHistory = () => {
+function showHistory() {
     document.getElementById('settings-modal').classList.add('hidden');
     const list = document.getElementById('history-list');
     if (HISTORY.length === 0) {
@@ -880,6 +1546,49 @@ window.showHistory = () => {
     }
     document.getElementById('history-modal').classList.remove('hidden');
     lucide.createIcons();
+};
+
+window.openShiftReports = () => {
+    document.getElementById('settings-modal').classList.add('hidden');
+    document.getElementById('shift-reports-modal').classList.remove('hidden');
+    
+    getShiftReports((reports) => {
+        const list = document.getElementById('shift-reports-list');
+        if (!reports.length) {
+            list.innerHTML = `<p style="color:var(--text-muted); text-align:center">No shift reports found.</p>`;
+            return;
+        }
+        list.innerHTML = '';
+        reports.forEach(r => {
+            const start = r.startTime ? new Date(r.startTime).toLocaleString() : 'Unknown';
+            const end = r.endTime ? new Date(r.endTime).toLocaleString() : 'Unknown';
+            const emp = r.employeeEmail || 'Unknown';
+            
+            const card = document.createElement('div');
+            card.style = 'background:var(--bg-input); border-radius:8px; padding:12px; cursor:pointer';
+            card.innerHTML = `
+                <div style="font-weight:700; margin-bottom:4px">${emp}</div>
+                <div style="font-size:11px; color:var(--text-muted)"><i data-lucide="calendar" style="width:12px; vertical-align:middle"></i> ${start} - ${end}</div>
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-top:8px">
+                    <span style="font-size:11px; font-weight:600; color:var(--primary)"><i data-lucide="download" style="width:12px; vertical-align:middle"></i> Download PDF</span>
+                    <span style="font-size:12px; font-weight:700; color:var(--success)">${r.actions ? r.actions.length : 0} Actions</span>
+                </div>
+            `;
+            card.addEventListener('click', () => downloadPastReport(r));
+            list.appendChild(card);
+        });
+        lucide.createIcons();
+    });
+};
+
+window.downloadPastReport = (reportData) => {
+    try {
+        downloadPDF(true, reportData);
+        showToast("Generating PDF...", "success");
+    } catch(err) {
+        console.error("Failed to parse past report", err);
+        showToast("Error generating PDF", "error");
+    }
 };
 
 window.clearHistory = () => {
@@ -1052,3 +1761,215 @@ window.setLang = (lang) => {
     applyTranslations(lang);
     showToast(TRANSLATIONS[lang].langChanged, 'success');
 };
+
+// --- SCANNER LOGIC ---
+let html5QrcodeScanner = null;
+let currentScanTarget = ''; // 'search' or 'sku'
+
+window.openScanner = (target) => {
+    currentScanTarget = target;
+    document.getElementById('scanner-modal').classList.remove('hidden');
+    
+    if (!html5QrcodeScanner) {
+        html5QrcodeScanner = new Html5QrcodeScanner("reader", { fps: 10, qrbox: {width: 250, height: 150} }, false);
+    }
+    
+    html5QrcodeScanner.render((decodedText, decodedResult) => {
+        if (currentScanTarget === 'search') {
+            document.getElementById('search-input').value = decodedText;
+            document.getElementById('search-bar').classList.remove('hidden');
+            render();
+        } else if (currentScanTarget === 'sku') {
+            document.getElementById('inp-sku').value = decodedText;
+        }
+        showToast('Barcode Scanned!', 'success');
+        closeScanner();
+    }, (error) => {
+        // ignore errors
+    });
+};
+
+window.closeScanner = () => {
+    document.getElementById('scanner-modal').classList.add('hidden');
+    if (html5QrcodeScanner) {
+        html5QrcodeScanner.clear().catch(e => console.error(e));
+        html5QrcodeScanner = null;
+    }
+};
+
+['login', 'reg'].forEach(prefix => {
+    const btn = document.getElementById(`btn-toggle-${prefix}-pwd`);
+    const inp = document.getElementById(`${prefix}-password`);
+    if (btn && inp) {
+        btn.addEventListener('click', (e) => {
+            e.preventDefault();
+            if (inp.type === 'password') {
+                inp.type = 'text';
+                btn.innerHTML = '<i data-lucide="eye-off" style="width:18px; color:var(--text-muted)"></i>';
+            } else {
+                inp.type = 'password';
+                btn.innerHTML = '<i data-lucide="eye" style="width:18px; color:var(--text-muted)"></i>';
+            }
+            lucide.createIcons();
+        });
+    }
+});
+
+function applyRoleVisibility(role) {
+    document.querySelectorAll('.owner-only').forEach(el => {
+        el.style.display = (role === 'owner') ? '' : 'none';
+    });
+    document.querySelectorAll('.employee-only').forEach(el => {
+        el.style.display = (role === 'employee') ? '' : 'none';
+    });
+}
+
+function renderTeamMembers(members) {
+    const list = document.getElementById('team-members-list');
+    if(!list) return;
+    list.innerHTML = '';
+    members.forEach(m => {
+        const div = document.createElement('div');
+        div.style.display = 'flex';
+        div.style.alignItems = 'center';
+        div.style.justifyContent = 'space-between';
+        div.style.padding = '8px 0';
+        div.style.borderBottom = '1px solid var(--border-color)';
+        
+        let roleBadge = m.role === 'owner' 
+            ? '<span class="badge" style="background:var(--primary); color:white">Owner</span>'
+            : '<span class="badge">Employee</span>';
+            
+        let removeBtn = '';
+        
+        div.innerHTML = `
+            <div>
+                <div style="font-size:14px; font-weight:600">${escapeHtml(m.email)}</div>
+                <div style="margin-top:4px">${roleBadge}</div>
+            </div>
+        `;
+        
+        if (m.role !== 'owner') {
+            const kickBtn = document.createElement('button');
+            kickBtn.className = 'btn-icon';
+            kickBtn.style = 'color:var(--danger); border-color:var(--danger); height:28px';
+            kickBtn.innerHTML = '<i data-lucide="trash-2" style="width:14px"></i>';
+            kickBtn.addEventListener('click', () => window.kickMember(m.uid));
+            div.style.display = 'flex';
+            div.style.justifyContent = 'space-between';
+            div.style.alignItems = 'center';
+            div.appendChild(kickBtn);
+        }
+        
+        list.appendChild(div);
+    });
+    lucide.createIcons();
+}
+
+window.kickMember = (uid) => {
+    if(confirm('Remove this employee from the store?')) {
+        removeStoreMember(uid).then(() => showToast('Employee removed', 'success'))
+        .catch(e => showToast(e.message, 'error'));
+    }
+};
+
+document.getElementById('btn-copy-code').addEventListener('click', () => {
+    const code = document.getElementById('display-store-code').textContent;
+    if (code && code !== '---') {
+        navigator.clipboard.writeText(code);
+        showToast('Store code copied!', 'success');
+    }
+});
+
+document.getElementById('btn-regen-code').addEventListener('click', () => {
+    if(confirm('Generate a new store code? The old one will stop working for new joins.')){
+        regenerateStoreCode().then((newCode) => {
+            document.getElementById('display-store-code').textContent = newCode;
+            showToast('Code regenerated', 'success');
+        }).catch(e => showToast(e.message, 'error'));
+    }
+});
+
+// --- GLOBAL EVENT DELEGATION FOR INVENTORY LIST ---
+document.getElementById('list').addEventListener('click', (e) => {
+    const btn = e.target.closest('button[data-action]');
+    const info = e.target.closest('.info[data-action="edit"]');
+    const countVal = e.target.closest('.count-val[data-action="edit"]');
+
+    if (btn) {
+        const id = btn.getAttribute('data-id');
+        const action = btn.getAttribute('data-action');
+        if (action === 'inc') window.mod(id, 1);
+        if (action === 'dec') window.mod(id, -1);
+        if (action === 'cart') window.addToCart(id);
+    } else if (info || countVal) {
+        const id = (info || countVal).getAttribute('data-id');
+        window.openModal(id);
+    }
+});
+
+// --- SPEECH RECOGNITION (Search by Voice) ---
+const micBtn = document.querySelector('.mic-btn');
+if (micBtn) {
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (SpeechRecognition) {
+        const recognition = new SpeechRecognition();
+        recognition.continuous = false;
+        recognition.interimResults = false;
+
+        micBtn.addEventListener('click', () => {
+            micBtn.style.color = 'var(--danger)'; // Turn red while listening
+            recognition.start();
+            showToast('Listening...', 'success');
+        });
+
+        recognition.onresult = (event) => {
+            const transcript = event.results[0][0].transcript;
+            const searchInput = document.getElementById('search-input');
+            searchInput.value = transcript;
+            // Trigger the input event to run search/render
+            searchInput.dispatchEvent(new Event('input'));
+            micBtn.style.color = 'var(--primary)';
+        };
+
+        recognition.onerror = (e) => {
+            micBtn.style.color = 'var(--primary)';
+            showToast('Mic error: ' + e.error, 'error');
+        };
+
+        recognition.onend = () => {
+            micBtn.style.color = 'var(--primary)';
+        };
+    } else {
+        micBtn.addEventListener('click', () => {
+            showToast('Voice search is not supported in this browser.', 'error');
+        });
+    }
+}
+
+// --- CSP-SAFE EVENT BINDINGS ---
+document.getElementById('btn-cancel-supplier').addEventListener('click', () => {
+    document.getElementById('supplier-modal').classList.add('hidden');
+});
+
+document.getElementById('btn-scan-search').addEventListener('click', () => openScanner('search'));
+document.getElementById('btn-scan-sku').addEventListener('click', () => openScanner('sku'));
+document.getElementById('btn-cancel-scanner').addEventListener('click', () => closeScanner());
+
+const scannerCancel2 = document.getElementById('btn-cancel-scanner-2');
+if (scannerCancel2) scannerCancel2.addEventListener('click', () => closeScanner());
+
+document.getElementById('btn-reset-app').addEventListener('click', (e) => {
+    e.preventDefault();
+    resetApp();
+});
+
+document.getElementById('btn-clear-cart').addEventListener('click', () => {
+    if (POS_CART.length === 0) return;
+    if (confirm('Are you sure you want to clear all items from the cart?')) {
+        POS_CART.length = 0;
+        localStorage.removeItem('posCart');
+        renderPOS();
+        showToast('Cart cleared', 'success');
+    }
+});
