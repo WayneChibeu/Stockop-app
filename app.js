@@ -61,6 +61,11 @@ window.addEventListener('DOMContentLoaded', () => {
                     if (window.isRegistering) return; // Wait for registration to complete
 
                     // Edge case: legacy account without a store. Log them out so they aren't stuck!
+                    document.getElementById('auth-error').style.color = 'var(--danger)';
+                    document.getElementById('auth-error').textContent = 'Your store was deleted. Please create a new account (or delete this one in Firebase) to start a new store.';
+                    document.getElementById('btn-login').disabled = false;
+                    document.getElementById('btn-login').textContent = 'Sign In';
+                    
                     logoutUser().catch(console.error);
                     return;
                 }
