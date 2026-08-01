@@ -334,45 +334,31 @@ function getShiftReports(callback) {
         return;
     }
     
-    // We fetch all for owner, or filter for employee
-    let query = db.collection('stores').doc(currentStoreId).collection('shift_reports').orderBy('createdAt', 'desc').limit(50);
+    let query = db.collection('stores').doc(currentStoreId).collection('shift_reports');
     
     if (currentUserRole !== 'owner') {
         const userEmail = firebase.auth().currentUser.email;
-        query = db.collection('stores').doc(currentStoreId).collection('shift_reports')
-            .where('employeeEmail', '==', userEmail)
-            .orderBy('createdAt', 'desc')
-            .limit(50);
+        query = query.where('employeeEmail', '==', userEmail);
     }
 
     query.onSnapshot((snapshot) => {
-        const reports = [];
+        let reports = [];
         snapshot.forEach((doc) => {
             reports.push({ id: doc.id, ...doc.data() });
         });
-        callback(reports);
+        
+        // Sort locally by startTime (descending)
+        reports.sort((a, b) => {
+            const tA = a.startTime ? new Date(a.startTime).getTime() : 0;
+            const tB = b.startTime ? new Date(b.startTime).getTime() : 0;
+            return tB - tA;
+        });
+        
+        // Return top 50
+        callback(reports.slice(0, 50));
     }, (err) => {
         console.error("Error fetching shift reports", err);
-        // Fallback if index is missing (since where + orderBy requires an index in Firestore)
-        if (err.code === 'failed-precondition' || (err.message && err.message.toLowerCase().includes('index'))) {
-            // Simple fetch without orderBy, sort locally
-            let fbQuery = db.collection('stores').doc(currentStoreId).collection('shift_reports');
-            if (currentUserRole !== 'owner') {
-                fbQuery = fbQuery.where('employeeEmail', '==', firebase.auth().currentUser.email);
-            }
-            
-            fbQuery.onSnapshot(snap => {
-                let r = [];
-                snap.forEach(d => r.push({ id: d.id, ...d.data() }));
-                r.sort((a,b) => (b.startTime > a.startTime ? 1 : -1));
-                callback(r);
-            }, (fbErr) => {
-                console.error("Fallback error", fbErr);
-                callback([]);
-            });
-        } else {
-            callback([]);
-        }
+        callback([]);
     });
 }
 
